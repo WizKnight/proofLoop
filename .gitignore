@@ -151,6 +151,8 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -158,6 +160,15 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
 
 # Spyder project settings
 .spyderproject
@@ -218,3 +229,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# IDE and operating system
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Generated run artifacts
+artifacts/
