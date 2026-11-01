@@ -21,8 +21,6 @@ def make_verified_report() -> dict:
         "evidence": [
             {
                 "step": "baseline_tests",
-                "exit_code": 1,
-                "timed_out": False,
                 "expected_failure": "test_full_discount",
                 "failure_reproduced": True,
                 "source_path": "fixtures/buggy_example.py",
@@ -58,8 +56,6 @@ def make_verified_report() -> dict:
             },
             {
                 "step": "post_patch_tests",
-                "exit_code": 0,
-                "timed_out": False,
                 "tests_passed": True,
                 "execution_id": "post-patch-execution-002",
                 "executor": "docker",

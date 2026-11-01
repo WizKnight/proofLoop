@@ -5,16 +5,17 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from backend.app.agent.repair_engine import repair_project
 from backend.app.schemas.evidence import RepairReport
 from backend.app.schemas.job import (
+    RepairHistoryItem,
     RepairJobResponse,
     RepairSubmissionResponse,
 )
-from backend.app.services.report_store import load_report, save_report
+from backend.app.services.report_store import list_reports, load_report, save_report
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,100 @@ def create_repair(
             detail="The repair job could not be created.",
         ) from None
 
+
+
+@app.get(
+    "/api/v1/repairs",
+    response_model=list[RepairHistoryItem],
+    tags=["Repairs"],
+)
+def list_repairs(
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[RepairHistoryItem]:
+    """Return recent repair jobs with independently validated report status."""
+    try:
+        saved_jobs = list_reports(limit=limit)
+    except (OSError, ValueError):
+        logger.exception("Could not list saved repair jobs")
+        raise HTTPException(
+            status_code=500,
+            detail="Repair history could not be retrieved.",
+        ) from None
+
+    history: list[RepairHistoryItem] = []
+
+    for job in saved_jobs:
+        try:
+            job_id_raw = job.get("job_id")
+            state_raw = job.get("state")
+            created_at_raw = job.get("created_at")
+            updated_at_raw = job.get("updated_at")
+
+            if job_id_raw is None:
+                raise ValueError("Missing job_id")
+
+            job_id_value = UUID(str(job_id_raw))
+
+            if state_raw not in {"queued", "running", "completed", "failed"}:
+                raise ValueError(f"Invalid job state: {state_raw!r}")
+
+            if created_at_raw is None:
+                raise ValueError("Missing created_at")
+
+            created_at_value = datetime.fromisoformat(str(created_at_raw))
+            updated_at_value = (
+                datetime.fromisoformat(str(updated_at_raw))
+                if updated_at_raw is not None
+                else None
+            )
+
+            job_metadata = {
+                "job_id": job_id_value,
+                "state": state_raw,
+                "created_at": created_at_value,
+                "updated_at": updated_at_value,
+                "error": job.get("error"),
+            }
+
+            report_data = job.get("report")
+
+            if report_data is None:
+                history_item = RepairHistoryItem(
+                    **job_metadata,
+                    report_integrity="not_available",
+                )
+            else:
+                try:
+                    validated_report = RepairReport.model_validate(report_data)
+
+                    history_item = RepairHistoryItem(
+                        **job_metadata,
+                        report_integrity="valid",
+                        report_status=validated_report.status,
+                        summary=validated_report.summary,
+                    )
+
+                except ValidationError:
+                    logger.warning(
+                        "Repair report %s failed current validation; "
+                        "excluding its report status from history.",
+                        job_id_value,
+                    )
+
+                    history_item = RepairHistoryItem(
+                        **job_metadata,
+                        report_integrity="invalid",
+                    )
+
+            history.append(history_item)
+
+        except (TypeError, ValueError, ValidationError):
+            logger.exception(
+                "Skipping repair history entry with invalid job metadata: %s",
+                job.get("job_id"),
+            )
+
+    return history
 
 @app.get(
     "/api/v1/repairs/{job_id}",

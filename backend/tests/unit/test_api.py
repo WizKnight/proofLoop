@@ -266,3 +266,99 @@ def test_background_repair_failure_is_persisted(client, monkeypatch):
     assert stored["report"] is None
     assert "internal test failure" not in str(stored)
     assert "could not be completed" in stored["error"]
+
+    status_response = client.get(
+        f"/api/v1/repairs/{job_id}"
+    )
+
+    assert status_response.status_code == 200
+    assert status_response.json()["state"] == "failed"
+    assert status_response.json()["error"] == (
+        "The repair job could not be completed. "
+        "Check the server logs for details."
+    )
+
+
+def test_repair_endpoint_rejects_oversized_bug_report(client):
+    response = client.post(
+        "/api/v1/repairs",
+        json={"bug_report": "A" * 4001},
+    )
+
+    assert response.status_code == 422
+
+
+def test_get_repair_hides_storage_errors(client, monkeypatch):
+    def fail_to_load(job_id):
+        raise OSError("Sensitive internal filesystem path")
+
+    monkeypatch.setattr(main, "load_report", fail_to_load)
+
+    response = client.get(
+        "/api/v1/repairs/00000000-0000-4000-8000-000000000001"
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == (
+        "The saved repair job could not be read."
+    )
+    assert "Sensitive internal filesystem path" not in response.text
+
+    def test_list_repairs_returns_recent_jobs(client, monkeypatch):
+        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        first_id = uuid4()
+        second_id = uuid4()
+        now = datetime.now(timezone.utc).isoformat()
+
+        saved_jobs = [
+            {
+                "job_id": str(first_id),
+                "state": "completed",
+                "created_at": now,
+                "updated_at": now,
+                "report": None,
+                "error": None,
+            },
+            {
+                "job_id": str(second_id),
+                "state": "running",
+                "created_at": now,
+                "updated_at": now,
+                "report": None,
+                "error": None,
+            },
+        ]
+
+        monkeypatch.setattr(
+            main,
+            "list_reports",
+            lambda limit: saved_jobs[:limit],
+        )
+
+        response = client.get("/api/v1/repairs")
+
+        assert response.status_code == 200
+        assert len(response.json()) == 2
+        assert response.json()[0]["job_id"] == str(first_id)
+        assert response.json()[1]["job_id"] == str(second_id)
+
+
+def test_list_repairs_respects_limit(client, monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "list_reports",
+        lambda limit: [],
+    )
+
+    response = client.get("/api/v1/repairs?limit=5")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_repairs_rejects_invalid_limit(client):
+    response = client.get("/api/v1/repairs?limit=0")
+
+    assert response.status_code == 422
