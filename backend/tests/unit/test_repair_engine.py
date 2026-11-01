@@ -270,3 +270,140 @@ def test_verified_report_contains_auditable_evidence(monkeypatch):
     assert post_patch["exit_code"] == 0
     assert post_patch["timed_out"] is False
     assert post_patch["tests_passed"] is True
+
+
+def make_execution_result(
+    *,
+    execution_id: str,
+    exit_code: int | None,
+    stdout: str = "",
+    timed_out: bool = False,
+) -> dict:
+    return {
+        "execution_id": execution_id,
+        "executor": "docker",
+        "sandbox_image": "proofloop-sandbox:local",
+        "execution_started": True,
+        "command": [
+            "docker",
+            "run",
+            "proofloop-sandbox:local",
+            "python",
+            "-m",
+            "pytest",
+        ],
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": "",
+        "timed_out": timed_out,
+    }
+
+
+def test_repair_engine_refuses_timed_out_baseline(monkeypatch):
+    def unexpected_model_call(**kwargs):
+        pytest.fail("Meta must not be called after a baseline timeout")
+
+    monkeypatch.setattr(
+        repair_engine,
+        "generate_patch_proposal",
+        unexpected_model_call,
+    )
+
+    monkeypatch.setattr(
+        repair_engine,
+        "run_pytest",
+        lambda *args, **kwargs: make_execution_result(
+            execution_id="00000000-0000-4000-8000-000000000010",
+            exit_code=None,
+            stdout="Execution timed out",
+            timed_out=True,
+        ),
+    )
+
+    project_root = Path(__file__).resolve().parents[3]
+
+    report = repair_engine.repair_project(
+        project_root=project_root,
+        bug_report="Test baseline timeout handling.",
+    )
+
+    assert report["status"] == "unverified"
+    assert "not reproduced" in report["summary"]
+
+    baseline = next(
+        item for item in report["evidence"]
+        if item["step"] == "baseline_tests"
+    )
+
+    assert baseline["timed_out"] is True
+    assert baseline["failure_reproduced"] is False
+
+
+def test_repair_engine_does_not_verify_timed_out_post_patch_tests(
+    monkeypatch,
+):
+    def fake_proposal(**kwargs):
+        return PatchProposal(
+            summary="Fix the full-discount boundary condition.",
+            edits=[
+                FileEdit(
+                    path="fixtures/buggy_example.py",
+                    old_text=(
+                        "    if discount_percent == 100:\n"
+                        "        return price"
+                    ),
+                    new_text=(
+                        "    if discount_percent == 100:\n"
+                        "        return 0"
+                    ),
+                    explanation="A full discount must return zero.",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        repair_engine,
+        "generate_patch_proposal",
+        fake_proposal,
+    )
+
+    execution_results = [
+        make_execution_result(
+            execution_id="00000000-0000-4000-8000-000000000011",
+            exit_code=1,
+            stdout="FAILED test_full_discount",
+        ),
+        make_execution_result(
+            execution_id="00000000-0000-4000-8000-000000000012",
+            exit_code=None,
+            stdout="Execution timed out",
+            timed_out=True,
+        ),
+    ]
+
+    def fake_run_pytest(*args, **kwargs):
+        return execution_results.pop(0)
+
+    monkeypatch.setattr(
+        repair_engine,
+        "run_pytest",
+        fake_run_pytest,
+    )
+
+    project_root = Path(__file__).resolve().parents[3]
+
+    report = repair_engine.repair_project(
+        project_root=project_root,
+        bug_report="A 100% discount should return zero.",
+    )
+
+    assert report["status"] == "unverified"
+
+    post_patch = next(
+        item for item in report["evidence"]
+        if item["step"] == "post_patch_tests"
+    )
+
+    assert post_patch["timed_out"] is True
+    assert post_patch["tests_passed"] is False
+    assert post_patch["exit_code"] is None

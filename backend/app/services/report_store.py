@@ -46,3 +46,33 @@ def load_report(job_id: str | UUID) -> dict[str, Any] | None:
         raise ValueError("Stored report must be a JSON object")
 
     return data
+
+
+def list_reports(limit: int = 20) -> list[dict[str, Any]]:
+    """Return the most recently created repair jobs first."""
+    if not 1 <= limit <= 100:
+        raise ValueError("Limit must be between 1 and 100")
+
+    if not REPORTS_DIR.exists():
+        return []
+
+    reports: list[dict[str, Any]] = []
+
+    for path in REPORTS_DIR.glob("*.json"):
+        # Only accept UUID-named report files.
+        try:
+            job_id = UUID(path.stem)
+        except ValueError:
+            continue
+
+        report = load_report(job_id)
+
+        if report is not None:
+            reports.append(report)
+
+    reports.sort(
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
+
+    return reports[:limit]
