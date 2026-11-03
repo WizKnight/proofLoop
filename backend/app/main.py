@@ -5,10 +5,20 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
+
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from backend.app.agent.repair_engine import repair_project
+from backend.app.agent.repair_engine import repair_project, repair_repository
 from backend.app.schemas.evidence import RepairReport
 from backend.app.schemas.job import (
     RepairHistoryItem,
@@ -16,6 +26,11 @@ from backend.app.schemas.job import (
     RepairSubmissionResponse,
 )
 from backend.app.services.report_store import list_reports, load_report, save_report
+from backend.app.services.repository_analyzer import analyze_repository
+from backend.app.services.upload_service import (
+    MAX_ARCHIVE_BYTES,
+    extract_repository_zip,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +45,21 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+    ],
+    allow_credentials=False,
+    allow_methods=[
+        "GET",
+        "POST",
+        "OPTIONS",
+    ],
+    allow_headers=[
+        "Content-Type",
+    ],
+)
 
 class RepairRequest(BaseModel):
     """Request to repair the controlled ProofLoop demo fixture."""
@@ -104,6 +134,75 @@ def execute_repair_job(job_id: UUID, bug_report: str) -> None:
                 job_id,
             )
 
+def execute_repository_repair_job(
+    job_id: UUID,
+    bug_report: str,
+    expected_failure: str,
+    upload_workspace,
+) -> None:
+    """Execute an uploaded repository repair and persist its result."""
+    try:
+        job_data = load_report(job_id)
+
+        if job_data is None:
+            raise ValueError("Queued repository repair job was not found.")
+
+        now = datetime.now(timezone.utc)
+        job_data["state"] = "running"
+        job_data["updated_at"] = now.isoformat()
+        save_report(job_id, job_data)
+
+        raw_report = repair_repository(
+            project_root=Path(upload_workspace.name),
+            bug_report=bug_report,
+            expected_failure=expected_failure,
+        )
+
+        validated_report = RepairReport.model_validate({
+            **raw_report,
+            "project": "Uploaded Python repository",
+            "timestamp_utc": datetime.now(timezone.utc),
+        })
+
+        job_data["state"] = "completed"
+        job_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        job_data["report"] = validated_report.model_dump(mode="json")
+        job_data["error"] = None
+
+        save_report(job_id, job_data)
+
+        logger.info(
+            "Repository repair job %s completed with status %s",
+            job_id,
+            validated_report.status,
+        )
+
+    except Exception:
+        logger.exception("Repository repair job %s failed", job_id)
+
+        try:
+            failed_job = load_report(job_id)
+
+            if failed_job is not None:
+                failed_job["state"] = "failed"
+                failed_job["updated_at"] = (
+                    datetime.now(timezone.utc).isoformat()
+                )
+                failed_job["error"] = (
+                    "The repository repair job could not be completed. "
+                    "Check the server logs for details."
+                )
+                save_report(job_id, failed_job)
+
+        except Exception:
+            logger.exception(
+                "Could not persist failed repository job %s",
+                job_id,
+            )
+
+    finally:
+        upload_workspace.cleanup()
+
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
 def health_check() -> HealthResponse:
@@ -157,6 +256,133 @@ def create_repair(
             detail="The repair job could not be created.",
         ) from None
 
+
+@app.post(
+    "/api/v1/repairs/repository",
+    response_model=RepairSubmissionResponse,
+    status_code=201,
+    tags=["Repairs"],
+)
+async def create_repository_repair(
+    background_tasks: BackgroundTasks,
+    repository: UploadFile = File(...),
+    bug_report: str = Form(..., min_length=10, max_length=4_000),
+    expected_failure: str = Form(..., min_length=1, max_length=300),
+) -> RepairSubmissionResponse:
+    """Accept a ZIP repository and schedule an evidence-driven repair."""
+
+    upload_workspace = None
+
+    try:
+        # Read the upload incrementally instead of trusting Content-Length.
+        chunks: list[bytes] = []
+        total_bytes = 0
+
+        while True:
+            chunk = await repository.read(64 * 1024)
+
+            if not chunk:
+                break
+
+            total_bytes += len(chunk)
+
+            if total_bytes > MAX_ARCHIVE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Uploaded ZIP exceeds the 25 MiB limit.",
+                )
+
+            chunks.append(chunk)
+
+        archive_data = b"".join(chunks)
+
+        if not archive_data:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded repository archive is empty.",
+            )
+
+        # Safely extract into a temporary directory.
+        upload_workspace = extract_repository_zip(archive_data)
+
+        # Analyze without executing repository code.
+        manifest = analyze_repository(Path(upload_workspace.name))
+
+        if not manifest.source_files:
+            raise HTTPException(
+                status_code=422,
+                detail="Repository contains no Python source files.",
+            )
+
+        usable_tests = [
+            path
+            for path in manifest.test_files
+            if Path(path).name != "conftest.py"
+        ]
+
+        if not usable_tests:
+            raise HTTPException(
+                status_code=422,
+                detail="Repository contains no discoverable pytest tests.",
+            )
+
+        # Create the job only after upload validation succeeds.
+        job_id = uuid4()
+        now = datetime.now(timezone.utc)
+
+        job_data = {
+            "job_id": str(job_id),
+            "state": "queued",
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+            "report": None,
+            "error": None,
+        }
+
+        save_report(job_id, job_data)
+
+        background_tasks.add_task(
+            execute_repository_repair_job,
+            job_id,
+            bug_report,
+            expected_failure,
+            upload_workspace,
+        )
+
+        # Ownership transfers to the background task.
+        upload_workspace = None
+
+        return RepairSubmissionResponse(
+            job_id=job_id,
+            state="queued",
+            report_url=f"/api/v1/repairs/{job_id}",
+        )
+
+    except HTTPException:
+        raise
+
+    except ValueError as exc:
+        logger.warning("Repository upload rejected: %s", exc)
+
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from None
+
+    except Exception:
+        logger.exception("Could not create repository repair job")
+
+        raise HTTPException(
+            status_code=500,
+            detail="The repository repair job could not be created.",
+        ) from None
+
+    finally:
+        await repository.close()
+
+        # Clean up if ownership was not transferred to the background task.
+        if upload_workspace is not None:
+            upload_workspace.cleanup()
 
 
 @app.get(

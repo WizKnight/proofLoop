@@ -1,7 +1,8 @@
-
 "use client";
 
 import { useEffect, useState } from "react";
+import { CheckCircle2, Clock3, RefreshCw } from "lucide-react";
+import Link from "next/link";
 
 import { listRepairs } from "@/lib/api";
 import type { RepairHistoryItem } from "@/types/repair";
@@ -16,24 +17,16 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat("en-IN", {
     day: "numeric",
     month: "short",
-    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
 }
 
 function getIntegrityLabel(item: RepairHistoryItem): string {
-  if (item.report_integrity === "invalid") {
-    return "Report unavailable";
-  }
+  if (item.report_integrity === "invalid") return "Unavailable";
+  if (item.report_integrity === "not_available") return "No report yet";
 
-  if (item.report_integrity === "not_available") {
-    return "No report yet";
-  }
-
-  return item.report_status === "verified"
-    ? "Verified"
-    : "Unverified";
+  return item.report_status === "verified" ? "Verified" : "Unverified";
 }
 
 export default function RecentActivity({
@@ -48,33 +41,26 @@ export default function RecentActivity({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-
   useEffect(() => {
     const controller = new AbortController();
 
-    listRepairs(20, controller.signal)
+    listRepairs(5, controller.signal)
       .then((items) => {
         if (controller.signal.aborted) return;
-
         setRepairs(items);
         setError(null);
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
-
         if (err instanceof Error && err.name === "AbortError") return;
 
         setError(
-          err instanceof Error
-            ? err.message
-            : "Could not load repair history."
+          err instanceof Error ? err.message : "Could not load repair history."
         );
       })
       .finally(() => {
         if (controller.signal.aborted) return;
-
         setLoading(false);
-        setRefreshing(false);
       });
 
     return () => controller.abort();
@@ -84,14 +70,12 @@ export default function RecentActivity({
     setRefreshing(true);
 
     try {
-      const items = await listRepairs(20);
+      const items = await listRepairs(5);
       setRepairs(items);
       setError(null);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Could not refresh repair history."
+        err instanceof Error ? err.message : "Could not refresh repair history."
       );
     } finally {
       setRefreshing(false);
@@ -99,115 +83,107 @@ export default function RecentActivity({
   }
 
   return (
-    <section className="recent-activity" aria-label="Recent repair activity">
-      <div className="section-heading">
-        <div className="history-heading">
-          <h2>Recent activity</h2>
-          {!loading && !error && (
-            <span className="history-count">
-              {repairs.length} repair runs
-            </span>
-          )}
-        </div>
+    <section aria-label="Recent repairs" className="space-y-3">
+      <div className="flex items-center justify-between px-2">
+        <h2 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          Recent repairs
+        </h2>
 
         <button
           type="button"
-          className="history-refresh"
           onClick={handleRefresh}
           disabled={loading || refreshing}
-        > 
-          {refreshing ? "Refreshing..." : "Refresh"}
+          aria-label="Refresh recent repairs"
+          className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        >
+          <RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />
         </button>
       </div>
 
       {loading ? (
-        <div className="empty-state" aria-live="polite">
-          <p>Loading repair history...</p>
-        </div>
+        <p className="px-2 py-3 text-xs text-muted-foreground">
+          Loading repairs...
+        </p>
       ) : error ? (
-        <div className="empty-state" role="alert">
-          <h3>Unable to load history</h3>
-          <p>{error}</p>
+        <div className="px-2 py-2">
+          <p className="text-xs text-destructive">{error}</p>
           <button
             type="button"
-            className="history-refresh"
             onClick={handleRefresh}
             disabled={refreshing}
+            className="mt-2 text-xs font-medium text-foreground underline underline-offset-4"
           >
             Try again
           </button>
         </div>
       ) : repairs.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-icon" aria-hidden="true">
-            ◷
-          </div>
-          <h3>No repairs yet</h3>
-          <p>
-            Your repair runs and their verification reports will appear
-            here once you start your first repair.
-          </p>
-        </div>
+        <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
+          No repair runs yet. Your recent repairs will appear here.
+        </p>
       ) : (
-        <div className="history-list">
-          
-        {repairs.map((repair) => {
-          const content = (
-            <div className="history-item-main">
-              <div className="history-item-title">
-                <span className="history-job-id">
-                  Repair {repair.job_id.slice(0, 8)}
-                </span>
+        <div className="space-y-1">
+          {repairs.map((repair) => {
+            const selectable = repair.report_integrity === "valid";
+            const selected = selectedJobId === repair.job_id;
 
-                <span className={`history-state history-state-${repair.state}`}>
-                  {repair.state}
-                </span>
-              </div>
+            const content = (
+              <>
+                <div className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="truncate text-xs font-medium">
+                    Repair {repair.job_id.slice(0, 8)}
+                  </span>
 
-              <p className="history-summary">
-                {repair.report_integrity === "valid"
-                  ? repair.summary
-                  : repair.report_integrity === "invalid"
-                    ? "This historical report does not meet current evidence validation requirements."
-                    : "Repair report has not been generated yet."}
-              </p>
+                  {repair.report_integrity === "valid" &&
+                  repair.report_status === "verified" ? (
+                    <CheckCircle2 className="size-3.5 shrink-0 text-emerald-600" />
+                  ) : (
+                    <Clock3 className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </div>
 
-              <div className="history-item-meta">
-                <span>{formatDate(repair.created_at)}</span>
+                <p className="mt-1 text-[10px] text-muted-foreground">
+                  {formatDate(repair.created_at)}
+                </p>
 
-                <span
-                  className={`history-integrity history-integrity-${repair.report_integrity}`}
-                >
+                <p className="mt-1 text-[10px] text-muted-foreground">
                   {getIntegrityLabel(repair)}
-                </span>
-              </div>
-            </div>
-          );
+                </p>
+              </>
+            );
 
-          if (repair.report_integrity === "valid") {
-            return (
+            return selectable ? (
               <button
+                key={repair.job_id}
                 type="button"
-                className={`history-item history-item-clickable ${
-                  selectedJobId === repair.job_id ? "history-item-selected" : ""
-                }`}key={repair.job_id}
                 onClick={() => onSelectRepair(repair.job_id)}
-                aria-label={`Open verified repair report ${repair.job_id}`}
+                aria-pressed={selected}
+                aria-label={`Open repair ${repair.job_id}`}
+                className={`w-full rounded-md border px-3 py-2.5 text-left transition-colors ${
+                  selected
+                    ? "border-primary/30 bg-accent text-accent-foreground"
+                    : "border-transparent hover:border-border hover:bg-muted/70"
+                }`}
               >
                 {content}
-                <span className="history-open-label">View report →</span>
-                </button>
-              );
-            }
-
-             return (
-              <article className="history-item" key={repair.job_id}>
+              </button>
+            ) : (
+              <div
+                key={repair.job_id}
+                className="rounded-md px-3 py-2.5 text-left text-muted-foreground"
+              >
                 {content}
-              </article>
+              </div>
             );
           })}
         </div>
       )}
+
+      <Link
+        href="/history"
+        className="block px-2 pt-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        View all repairs →
+      </Link>
     </section>
   );
 }

@@ -1,5 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
+import io
+import zipfile
 
 from backend.app import main
 
@@ -362,3 +364,406 @@ def test_list_repairs_rejects_invalid_limit(client):
     response = client.get("/api/v1/repairs?limit=0")
 
     assert response.status_code == 422
+
+
+def make_repository_zip() -> bytes:
+    """Create a small valid Python repository ZIP."""
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "project/app.py",
+            "def calculate_discount(price, percentage):\n"
+            "    return price\n",
+        )
+
+        archive.writestr(
+            "project/tests/test_app.py",
+            "from app import calculate_discount\n\n"
+            "def test_full_discount():\n"
+            "    assert calculate_discount(100, 100) == 0\n",
+        )
+
+    return buffer.getvalue()
+
+def make_multi_file_verified_report():
+    data = make_verified_report()
+
+    diff = (
+        "--- original/project/app.py\n"
+        "+++ patched/project/app.py\n"
+        "-    return price\n"
+        "+    return 0\n"
+        "--- original/project/utils.py\n"
+        "+++ patched/project/utils.py\n"
+        "-    return value\n"
+        "+    return value * 1\n"
+    )
+
+    changed_files = [
+        {
+            "path": "project/app.py",
+            "source_sha256_before": "a" * 64,
+            "source_sha256_after": "b" * 64,
+        },
+        {
+            "path": "project/utils.py",
+            "source_sha256_before": "c" * 64,
+            "source_sha256_after": "d" * 64,
+        },
+    ]
+
+    data["evidence"][0]["source_path"] = "project/app.py"
+    data["evidence"][2]["source_path"] = "project/app.py"
+    data["evidence"][2]["diff"] = diff
+    data["evidence"][2]["changed_files"] = changed_files
+
+    data["diff"] = diff
+    data["root_cause"] = (
+        "The discount calculation failed to handle a full discount."
+    )
+    data["changed_files"] = changed_files
+
+    return data
+
+
+def test_repository_upload_rejects_empty_archive(client):
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                b"",
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_repository_upload_rejects_invalid_zip(client):
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                b"not a zip archive",
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_repository_upload_rejects_missing_tests(client):
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "project/app.py",
+            "def calculate_discount(price, percentage):\n"
+            "    return price\n",
+        )
+
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                buffer.getvalue(),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "pytest tests" in response.text.lower()
+
+def test_repository_upload_completes_and_cleans_workspace(
+    client,
+    monkeypatch,
+):
+    from pathlib import Path
+
+    saved_jobs = {}
+    captured_workspace = {}
+
+    original_extract = main.extract_repository_zip
+
+    def tracking_extract(archive_data):
+        workspace = original_extract(archive_data)
+        captured_workspace["path"] = Path(workspace.name)
+        return workspace
+
+    def fake_repair_repository(**kwargs):
+        project_root = Path(kwargs["project_root"])
+
+        assert project_root.is_dir()
+        assert (project_root / "project/app.py").is_file()
+        assert kwargs["bug_report"] == (
+            "Fix the full discount calculation."
+        )
+        assert kwargs["expected_failure"] == "test_full_discount"
+
+        return make_multi_file_verified_report()
+
+    monkeypatch.setattr(
+        main,
+        "extract_repository_zip",
+        tracking_extract,
+    )
+
+    monkeypatch.setattr(
+        main,
+        "repair_repository",
+        fake_repair_repository,
+    )
+
+    monkeypatch.setattr(
+        main,
+        "save_report",
+        lambda job_id, report: saved_jobs.__setitem__(
+            str(job_id),
+            report.copy(),
+        ),
+    )
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: saved_jobs.get(str(job_id)),
+    )
+
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                make_repository_zip(),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    submission = response.json()
+    job_id = submission["job_id"]
+
+    assert submission["state"] == "queued"
+    assert submission["report_url"] == (
+        f"/api/v1/repairs/{job_id}"
+    )
+
+    stored = saved_jobs[job_id]
+
+    assert stored["state"] == "completed"
+    assert stored["report"]["status"] == "verified"
+    assert len(stored["report"]["changed_files"]) == 2
+    assert stored["report"]["root_cause"]
+    assert stored["error"] is None
+
+    # TestClient executes background tasks before returning.
+    assert "path" in captured_workspace
+    assert not captured_workspace["path"].exists()
+
+def test_repository_repair_failure_is_persisted_and_cleaned(
+    client,
+    monkeypatch,
+):
+    from pathlib import Path
+
+    saved_jobs = {}
+    captured = {}
+
+    original_extract = main.extract_repository_zip
+
+    def tracking_extract(archive_data):
+        workspace = original_extract(archive_data)
+        captured["path"] = Path(workspace.name)
+        return workspace
+
+    def fail_repair(**kwargs):
+        raise RuntimeError("simulated repository repair failure")
+
+    monkeypatch.setattr(main, "extract_repository_zip", tracking_extract)
+    monkeypatch.setattr(main, "repair_repository", fail_repair)
+
+    monkeypatch.setattr(
+        main,
+        "save_report",
+        lambda job_id, report: saved_jobs.__setitem__(
+            str(job_id), report.copy()
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: saved_jobs.get(str(job_id)),
+    )
+
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                make_repository_zip(),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    job_id = response.json()["job_id"]
+    stored = saved_jobs[job_id]
+
+    assert stored["state"] == "failed"
+    assert stored["report"] is None
+    assert "simulated repository repair failure" not in str(stored)
+    assert "could not be completed" in stored["error"]
+
+    assert "path" in captured
+    assert not captured["path"].exists()
+
+
+def test_repository_repair_rejects_invalid_verified_report(
+    client,
+    monkeypatch,
+):
+    from pathlib import Path
+
+    saved_jobs = {}
+    captured = {}
+
+    original_extract = main.extract_repository_zip
+
+    def tracking_extract(archive_data):
+        workspace = original_extract(archive_data)
+        captured["path"] = Path(workspace.name)
+        return workspace
+
+    def invalid_repair(**kwargs):
+        data = make_multi_file_verified_report()
+
+        # Deliberately corrupt the primary file's after hash.
+        data["changed_files"][0]["source_sha256_after"] = "e" * 64
+        data["evidence"][2]["changed_files"] = data["changed_files"]
+
+        return data
+
+    monkeypatch.setattr(main, "extract_repository_zip", tracking_extract)
+    monkeypatch.setattr(main, "repair_repository", invalid_repair)
+
+    monkeypatch.setattr(
+        main,
+        "save_report",
+        lambda job_id, report: saved_jobs.__setitem__(
+            str(job_id), report.copy()
+        ),
+    )
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: saved_jobs.get(str(job_id)),
+    )
+
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                make_repository_zip(),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 201
+
+    job_id = response.json()["job_id"]
+    stored = saved_jobs[job_id]
+
+    assert stored["state"] == "failed"
+    assert stored["report"] is None
+    assert "could not be completed" in stored["error"]
+
+    assert not captured["path"].exists()
+
+
+def test_repository_upload_cleans_workspace_when_analysis_fails(
+    client,
+    monkeypatch,
+):
+    from pathlib import Path
+
+    captured = {}
+    saved_jobs = {}
+
+    original_extract = main.extract_repository_zip
+
+    def tracking_extract(archive_data):
+        workspace = original_extract(archive_data)
+        captured["path"] = Path(workspace.name)
+        return workspace
+
+    def fail_analysis(project_root):
+        raise ValueError("simulated repository analysis failure")
+
+    monkeypatch.setattr(main, "extract_repository_zip", tracking_extract)
+    monkeypatch.setattr(main, "analyze_repository", fail_analysis)
+
+    monkeypatch.setattr(
+        main,
+        "save_report",
+        lambda job_id, report: saved_jobs.__setitem__(
+            str(job_id), report.copy()
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/repairs/repository",
+        data={
+            "bug_report": "Fix the full discount calculation.",
+            "expected_failure": "test_full_discount",
+        },
+        files={
+            "repository": (
+                "project.zip",
+                make_repository_zip(),
+                "application/zip",
+            ),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "simulated repository analysis failure" in response.text
+
+    assert captured["path"].exists() is False
+    assert saved_jobs == {}

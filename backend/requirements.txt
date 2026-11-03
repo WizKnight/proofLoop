@@ -3,7 +3,7 @@ uvicorn[standard]
 openai
 python-dotenv
 pydantic
+pydantic-settings
+python-multipart
 pytest
 httpx
-pydantic
-pydantic-settings

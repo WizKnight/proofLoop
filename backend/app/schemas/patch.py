@@ -38,17 +38,26 @@ class FileEdit(BaseModel):
         return self
 
 
+
 class PatchProposal(BaseModel):
-    """A bounded patch proposal returned by the model."""
+    """A bounded, evidence-informed multi-file repair proposal."""
 
     model_config = ConfigDict(extra="forbid")
 
+    root_cause: str | None = Field(default=None, max_length=2_000)
+    diagnosis_evidence: list[str] = Field(
+        default_factory=list,
+        max_length=8,
+    )
     summary: str = Field(min_length=1, max_length=1_000)
     edits: list[FileEdit] = Field(min_length=1, max_length=3)
 
     @model_validator(mode="after")
     def validate_unique_paths(self) -> Self:
         paths = [edit.path for edit in self.edits]
+
         if len(paths) != len(set(paths)):
             raise ValueError("Only one edit per file is allowed")
+
         return self
+
