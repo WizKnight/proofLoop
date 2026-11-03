@@ -2,7 +2,44 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pathlib import PurePosixPath, PureWindowsPath
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
+
+class ChangedFileEvidence(BaseModel):
+    """Hash evidence for one modified repository source file."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1, max_length=200)
+    source_sha256_before: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_sha256_after: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_file_change(self) -> "ChangedFileEvidence":
+        posix_path = PurePosixPath(self.path)
+        windows_path = PureWindowsPath(self.path)
+
+        if (
+            posix_path.is_absolute()
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or "\\" in self.path
+            or any(part in {"", ".", ".."} for part in self.path.split("/"))
+        ):
+            raise ValueError("Changed file path must be a safe relative path")
+
+        if self.source_sha256_before == self.source_sha256_after:
+            raise ValueError(
+                "Changed file must have different before and after hashes"
+            )
+
+        return self
 
 
 class EvidenceEntry(BaseModel):
@@ -24,6 +61,7 @@ class EvidenceEntry(BaseModel):
     source_sha256_before: str | None = None
     source_sha256_after: str | None = None
     diff: str | None = None
+    changed_files: list[ChangedFileEvidence] | None = None
 
     # Test execution evidence
     execution_id: str | None = None
@@ -54,6 +92,8 @@ class RepairReport(BaseModel):
     evidence: list[EvidenceEntry]
 
     patch_summary: str | None = None
+    root_cause: str | None = None
+    changed_files: list[ChangedFileEvidence] = Field(default_factory=list)
     diff: str | None = None
     verification_scope: str | list[str] | tuple[str, ...] | None = None
     error: str | None = None
@@ -117,6 +157,54 @@ class RepairReport(BaseModel):
             raise ValueError(
                 "Baseline source hash must match the patch's original source hash"
             )
+
+        
+        # 3a. Validate multi-file change evidence when provided.
+        # Legacy single-file reports remain valid without changed_files.
+        report_files = self.changed_files
+        application_files = application.changed_files
+
+        if report_files or application_files:
+            # If either side contains multi-file evidence, both must.
+            if not report_files or not application_files:
+                raise ValueError(
+                    "Top-level and patch application must both contain "
+                    "multi-file change evidence"
+                )
+
+            changed_paths = [item.path for item in report_files]
+
+            if len(changed_paths) != len(set(changed_paths)):
+                raise ValueError(
+                    "Changed file evidence must not contain duplicate paths"
+                )
+
+            if application_files != report_files:
+                raise ValueError(
+                    "Top-level changed files must match patch application evidence"
+                )
+
+            primary_file = next(
+                (
+                    item for item in report_files
+                    if item.path == application.source_path
+                ),
+                None,
+            )
+
+            if primary_file is None:
+                raise ValueError(
+                    "Primary source file must exist in changed file evidence"
+                )
+
+            if (
+                primary_file.source_sha256_before != before_hash
+                or primary_file.source_sha256_after != after_hash
+            ):
+                raise ValueError(
+                    "Primary source hashes must match patch application evidence"
+                )
+
 
         if not application.diff or not self.diff:
             raise ValueError(

@@ -1,4 +1,3 @@
-
 export type RepairStatus = "verified" | "unverified";
 
 export type JobState =
@@ -29,6 +28,12 @@ export interface FileEditEvidence {
   explanation: string;
 }
 
+export interface ChangedFileEvidence {
+  path: string;
+  source_sha256_before: string;
+  source_sha256_after: string;
+}
+
 export interface EvidenceEntry {
   step: string;
 
@@ -42,6 +47,8 @@ export interface EvidenceEntry {
   source_sha256?: string | null;
   source_sha256_before?: string | null;
   source_sha256_after?: string | null;
+
+  changed_files?: ChangedFileEvidence[] | null;
 
   diff?: string | null;
 
@@ -68,14 +75,19 @@ export interface RepairReport {
   summary: string;
   evidence: EvidenceEntry[];
 
+  root_cause?: string | null;
+  changed_files?: ChangedFileEvidence[];
+
   patch_summary?: string | null;
   diff?: string | null;
   verification_scope?: string | string[] | null;
   error?: string | null;
 }
 
-
-export type ReportIntegrity = "valid" | "invalid" | "not_available";
+export type ReportIntegrity =
+  | "valid"
+  | "invalid"
+  | "not_available";
 
 export interface RepairHistoryItem {
   job_id: string;

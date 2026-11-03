@@ -81,6 +81,33 @@ def make_verified_report() -> dict:
         ),
     }
 
+import copy
+
+def make_multi_file_verified_report() -> dict:
+    """Return a verified report with consistent multi-file evidence."""
+    data = make_verified_report()
+
+    changed_files = [
+        {
+            "path": "fixtures/buggy_example.py",
+            "source_sha256_before": "a" * 64,
+            "source_sha256_after": "b" * 64,
+        },
+        {
+            "path": "backend/app/services/example.py",
+            "source_sha256_before": "c" * 64,
+            "source_sha256_after": "d" * 64,
+        },
+    ]
+
+    data["root_cause"] = (
+        "The discount calculation did not handle a 100% discount."
+    )
+    data["changed_files"] = copy.deepcopy(changed_files)
+    data["evidence"][2]["changed_files"] = copy.deepcopy(changed_files)
+
+    return data
+
 
 def test_valid_verified_report_is_accepted():
     report = RepairReport.model_validate(make_verified_report())
@@ -162,3 +189,63 @@ def test_unverified_report_can_have_incomplete_evidence():
 
     assert report.status == "unverified"
     assert report.evidence == []
+
+
+def test_valid_multi_file_verified_report_is_accepted():
+    data = make_multi_file_verified_report()
+
+    report = RepairReport.model_validate(data)
+
+    assert report.status == "verified"
+    assert len(report.changed_files) == 2
+    assert report.root_cause is not None
+
+
+def test_multi_file_report_requires_evidence_on_both_sides():
+    data = make_multi_file_verified_report()
+    data["evidence"][2].pop("changed_files")
+
+    with pytest.raises(
+        ValidationError,
+        match="both contain multi-file change evidence",
+    ):
+        RepairReport.model_validate(data)
+
+
+def test_multi_file_report_rejects_duplicate_paths():
+    data = make_multi_file_verified_report()
+    data["changed_files"].append(
+        data["changed_files"][0].copy()
+    )
+    data["evidence"][2]["changed_files"] = data["changed_files"]
+
+    with pytest.raises(
+        ValidationError,
+        match="duplicate paths",
+    ):
+        RepairReport.model_validate(data)
+
+
+def test_multi_file_report_rejects_primary_hash_mismatch():
+    data = make_multi_file_verified_report()
+    data["changed_files"][0]["source_sha256_after"] = "e" * 64
+    data["evidence"][2]["changed_files"] = data["changed_files"]
+
+    with pytest.raises(
+        ValidationError,
+        match="Primary source hashes",
+    ):
+        RepairReport.model_validate(data)
+
+
+def test_multi_file_report_rejects_inconsistent_file_evidence():
+    data = make_multi_file_verified_report()
+    data["evidence"][2]["changed_files"][1][
+        "source_sha256_after"
+    ] = "e" * 64
+
+    with pytest.raises(
+        ValidationError,
+        match="must match patch application evidence",
+    ):
+        RepairReport.model_validate(data)

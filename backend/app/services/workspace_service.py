@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.app.schemas.execution import ExecutionResult
 from backend.app.schemas.patch import FileEdit
+from backend.app.schemas.repository import RepositoryManifest
 
 
 SANDBOX_IMAGE = "proofloop-sandbox:local"
@@ -59,8 +60,9 @@ def _new_output_buffer() -> dict[str, Any]:
     }
 
 
+
 def _safe_file(root: Path, relative_path: str) -> Path:
-    """Resolve a relative file path and ensure it stays inside root."""
+    """Resolve a relative path while rejecting traversal and symlinks."""
     relative = PurePosixPath(relative_path)
 
     if (
@@ -73,10 +75,19 @@ def _safe_file(root: Path, relative_path: str) -> Path:
         raise ValueError("Unsafe workspace path")
 
     root_resolved = root.resolve()
-    candidate = root_resolved.joinpath(*relative.parts)
+    candidate = root_resolved
 
-    if not candidate.resolve().is_relative_to(root_resolved):
-        raise ValueError("Path escapes workspace")
+    # Inspect every existing component before resolving the final path.
+    for part in relative.parts:
+        candidate = candidate / part
+
+        if candidate.is_symlink():
+            raise ValueError("Path escapes workspace")
+
+        resolved_candidate = candidate.resolve()
+
+        if not resolved_candidate.is_relative_to(root_resolved):
+            raise ValueError("Path escapes workspace")
 
     return candidate
 
@@ -86,7 +97,14 @@ def create_workspace(
     relative_paths: list[str],
 ) -> tempfile.TemporaryDirectory[str]:
     """Create a disposable workspace containing only approved files."""
+    if source_root.is_symlink():
+        raise ValueError("Source root must not be a symlink")
+
     source_root = source_root.resolve()
+
+    if not source_root.is_dir():
+        raise ValueError("Source root must be a directory")
+
     workspace = tempfile.TemporaryDirectory(prefix="proofloop-")
     destination_root = Path(workspace.name)
 
@@ -109,6 +127,14 @@ def create_workspace(
                 exist_ok=True,
             )
 
+            # Revalidate the source after directory creation.
+            source = _safe_file(source_root, relative_path)
+
+            if source.is_symlink() or not source.is_file():
+                raise ValueError(
+                    f"Approved source must be a regular file: {relative_path}"
+                )
+
             shutil.copyfile(source, destination)
 
         return workspace
@@ -116,6 +142,35 @@ def create_workspace(
     except Exception:
         workspace.cleanup()
         raise
+
+
+def create_repository_workspace(
+    source_root: Path,
+    manifest: RepositoryManifest,
+) -> tempfile.TemporaryDirectory[str]:
+    """
+    Create a disposable workspace from a validated repository manifest.
+
+    Only discovered source, test, and approved configuration files
+    are copied. The original project remains untouched.
+    """
+    approved_paths = (
+        manifest.source_files
+        + manifest.test_files
+        + manifest.config_files
+    )
+
+    if not approved_paths:
+        raise ValueError("Repository contains no approved files")
+
+    if len(approved_paths) > 500:
+        raise ValueError("Repository exceeds workspace file limit")
+
+    return create_workspace(
+        source_root=source_root,
+        relative_paths=approved_paths,
+    )
+
 
 
 def apply_edit(
@@ -159,12 +214,18 @@ def apply_edit(
     )
 
 
+
 def _build_docker_command(
     workspace_root: Path,
-    test_path: str,
+    test_path: str | list[str],
     container_name: str,
 ) -> list[str]:
-    """Build the restricted Docker test command."""
+    """Build a restricted Docker command for one or more pytest targets."""
+    test_paths = [test_path] if isinstance(test_path, str) else list(test_path)
+
+    if not test_paths:
+        raise ValueError("At least one test target is required")
+
     return [
         "docker",
         "run",
@@ -201,7 +262,7 @@ def _build_docker_command(
         "-q",
         "-p",
         "no:cacheprovider",
-        test_path,
+        *test_paths,
     ]
 
 
@@ -310,24 +371,43 @@ def _build_execution_result(
     return result.model_dump(mode="json")
 
 
+
 def run_pytest(
     workspace_root: Path,
-    test_path: str,
+    test_path: str | list[str],
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
-    """Run pytest inside a restricted Docker container."""
+    """Run one or more approved pytest targets inside restricted Docker."""
     if not 1 <= timeout_seconds <= 120:
         raise ValueError(
             "Timeout must be between 1 and 120 seconds"
         )
 
     workspace_root = workspace_root.resolve()
-    test_file = _safe_file(workspace_root, test_path)
 
-    if not test_file.is_file():
-        raise ValueError(
-            "Test file does not exist in the workspace"
-        )
+    test_paths = (
+        [test_path]
+        if isinstance(test_path, str)
+        else list(test_path)
+    )
+
+    if not test_paths:
+        raise ValueError("At least one test target is required")
+
+    if len(test_paths) > 500:
+        raise ValueError("Too many pytest targets")
+
+    if len(test_paths) != len(set(test_paths)):
+        raise ValueError("Duplicate pytest targets are not allowed")
+
+    # Validate every target before starting Docker.
+    for relative_path in test_paths:
+        test_file = _safe_file(workspace_root, relative_path)
+
+        if test_file.is_symlink() or not test_file.is_file():
+            raise ValueError(
+                f"Test file does not exist as a regular file: {relative_path}"
+            )
 
     execution_id = uuid.uuid4()
     container_name = (
@@ -336,7 +416,7 @@ def run_pytest(
 
     command = _build_docker_command(
         workspace_root,
-        test_path,
+        test_paths,
         container_name,
     )
 

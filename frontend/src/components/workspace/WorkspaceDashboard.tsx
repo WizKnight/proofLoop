@@ -1,24 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import RepairWorkspace from "@/components/repair/repair-workspace";
 
-import RecentActivity from "@/components/workspace/RecentActivity";
-import RepairWorkspace from "@/components/workspace/RepairWorkspace";
+interface WorkspaceDashboardProps {
+  historyJobId: string | null;
+  onHistorySelectionCleared: () => void;
+}
 
-export default function WorkspaceDashboard() {
-  const [historyJobId, setHistoryJobId] = useState<string | null>(null);
-
+export default function WorkspaceDashboard({
+  historyJobId,
+  onHistorySelectionCleared,
+}: WorkspaceDashboardProps) {
   return (
-    <>
-      <RepairWorkspace
-        historyJobId={historyJobId}
-        onHistorySelectionCleared={() => setHistoryJobId(null)}
-      />
-
-      <RecentActivity
-        selectedJobId={historyJobId}
-        onSelectRepair={setHistoryJobId}
-      />
-    </>
+    <RepairWorkspace
+    />
   );
 }
