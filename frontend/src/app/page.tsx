@@ -29,9 +29,7 @@ export default function Home() {
 
         {/* Repair workspace */}
         <div className="w-full">
-          <WorkspaceDashboard historyJobId={null} onHistorySelectionCleared={function (): void {
-            throw new Error("Function not implemented.");
-          } } />
+          <WorkspaceDashboard />
         </div>
 
         {/* Footer */}

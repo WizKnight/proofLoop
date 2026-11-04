@@ -190,7 +190,7 @@ export default function DocumentationPage() {
           />
 
           <div className="space-y-3">
-            {workflow.map((step, _index) => {
+            {workflow.map((step) => {
               const Icon = step.icon;
 
               return (
