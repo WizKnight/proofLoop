@@ -31,6 +31,18 @@ from backend.app.services.upload_service import (
     MAX_ARCHIVE_BYTES,
     extract_repository_zip,
 )
+from backend.app.schemas.conversation import (
+    ConversationMessage,
+    ConversationRequest,
+    ConversationResponse,
+)
+from backend.app.services.conversation_store import (
+    conversation_locked,
+    create_message,
+    load_conversation,
+    save_conversation,
+)
+from backend.app.services.repair_assistant import generate_repair_answer
 
 logger = logging.getLogger(__name__)
 
@@ -507,4 +519,199 @@ def get_repair(job_id: UUID) -> RepairJobResponse:
         raise HTTPException(
             status_code=500,
             detail="The saved repair job is invalid.",
+        ) from None
+
+
+
+@app.post(
+    "/api/v1/repairs/{job_id}/conversation",
+    response_model=ConversationResponse,
+    tags=["Conversation"],
+)
+@conversation_locked
+def send_repair_message(
+    job_id: UUID,
+    request: ConversationRequest,
+) -> ConversationResponse:
+    """Answer a question using the completed repair's evidence."""
+
+    try:
+        job = load_report(job_id)
+    except (OSError, ValueError):
+        logger.exception("Could not load repair job for conversation")
+        raise HTTPException(
+            status_code=500,
+            detail="Repair session could not be loaded.",
+        ) from None
+
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Repair session not found.",
+        )
+
+    if job.get("state") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation is available after the repair completes.",
+        )
+
+    report_data = job.get("report")
+
+    if not isinstance(report_data, dict):
+        raise HTTPException(
+            status_code=409,
+            detail="Repair report is not available.",
+        )
+
+    try:
+        report = RepairReport.model_validate(report_data)
+        history = load_conversation(job_id)
+    except (ValueError, OSError):
+        logger.exception("Invalid repair context or conversation history")
+        raise HTTPException(
+            status_code=500,
+            detail="Repair conversation context could not be loaded.",
+        ) from None
+
+    request_id = request.client_request_id
+    if isinstance(request_id, str):
+        try:
+            request_id = UUID(request_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid client request ID.",
+            ) from None
+
+    if request_id is not None:
+      existing_index = next(
+          (
+              index
+              for index, message in enumerate(history)
+              if message.get("role") == "user"
+              and message.get("client_request_id") == str(request_id)
+          ),
+          None,
+      )
+
+      if existing_index is not None:
+        existing_user = history[existing_index]
+
+        if existing_user.get("content") != request.message:
+          raise HTTPException(
+              status_code=409,
+              detail="Request ID was already used for another message.",
+          )
+
+        if existing_index + 1 >= len(history):
+          raise HTTPException(
+              status_code=409,
+              detail="The previous request has no completed response.",
+          )
+
+        existing_assistant = history[existing_index + 1]
+
+        if existing_assistant.get("role") != "assistant":
+          raise HTTPException(
+              status_code=409,
+              detail="The previous request has an invalid conversation record.",
+          )
+
+        return ConversationResponse(
+            job_id=str(job_id),
+            messages=[
+                ConversationMessage.model_validate(existing_user),
+                ConversationMessage.model_validate(existing_assistant),
+            ],
+            reply=existing_assistant["content"],
+        )
+
+    if len(history) + 2 > 40:
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation limit reached for this repair session.",
+        )
+
+    try:
+        answer = generate_repair_answer(
+            report=report.model_dump(mode="json"),
+            history=history,
+            question=request.message,
+        )
+
+        user_message = create_message(
+            "user",
+            request.message,
+            client_request_id=request_id,
+        )
+        assistant_message = create_message("assistant", answer)
+
+        updated_history = history + [
+            user_message,
+            assistant_message,
+        ]
+
+        save_conversation(job_id, updated_history)
+
+        return ConversationResponse(
+            job_id=str(job_id),
+            messages=[
+                ConversationMessage.model_validate(user_message),
+                ConversationMessage.model_validate(assistant_message),
+            ],
+            reply=answer,
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from None
+
+    except Exception:
+        logger.exception(
+            "Repair assistant failed for job %s",
+            job_id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="The repair assistant could not generate a response.",
+        ) from None
+
+
+@app.get(
+    "/api/v1/repairs/{job_id}/conversation",
+    response_model=list[ConversationMessage],
+    tags=["Conversation"],
+)
+@conversation_locked
+def get_repair_conversation(job_id: UUID) -> list[ConversationMessage]:
+    """Retrieve conversation history for a repair session."""
+
+    job = load_report(job_id)
+
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Repair session not found.",
+        )
+
+    if job.get("state") != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Conversation is available after the repair completes.",
+        )
+
+    try:
+        messages = load_conversation(job_id)
+        return [
+            ConversationMessage.model_validate(message)
+            for message in messages
+        ]
+    except (ValueError, OSError):
+        logger.exception("Could not load repair conversation")
+        raise HTTPException(
+            status_code=500,
+            detail="Conversation history could not be loaded.",
         ) from None

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ProofLoop — AI Code Repair",
+  title: "ProofLoop - AI Code Repair",
   description:
     "Investigate bugs, generate patches, and verify code repairs through real execution evidence.",
 };

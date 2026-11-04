@@ -767,3 +767,276 @@ def test_repository_upload_cleans_workspace_when_analysis_fails(
 
     assert captured["path"].exists() is False
     assert saved_jobs == {}
+
+from datetime import datetime, timezone
+from uuid import uuid4
+
+
+def make_completed_conversation_job():
+    now = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "job_id": str(uuid4()),
+        "state": "completed",
+        "created_at": now,
+        "updated_at": now,
+        "report": make_verified_report() | {
+            "project": "ProofLoop",
+            "timestamp_utc": now,
+        },
+        "error": None,
+    }
+
+
+def test_conversation_sends_message_and_persists_exchange(
+    client,
+    monkeypatch,
+):
+    job = make_completed_conversation_job()
+    saved = {}
+    generated = {}
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: job,
+    )
+    monkeypatch.setattr(
+        main,
+        "load_conversation",
+        lambda job_id: [],
+    )
+
+    def fake_answer(**kwargs):
+        generated.update(kwargs)
+        return "The incorrect special case caused the bug."
+
+    monkeypatch.setattr(
+        main,
+        "generate_repair_answer",
+        fake_answer,
+    )
+
+    monkeypatch.setattr(
+        main,
+        "save_conversation",
+        lambda job_id, messages: saved.update(
+            messages=messages
+        ),
+    )
+
+    response = client.post(
+        f"/api/v1/repairs/{job['job_id']}/conversation",
+        json={"message": "Explain the root cause."},
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["job_id"] == job["job_id"]
+    assert body["reply"] == (
+        "The incorrect special case caused the bug."
+    )
+    assert len(body["messages"]) == 2
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][1]["role"] == "assistant"
+
+    assert generated["question"] == "Explain the root cause."
+    assert generated["report"]["status"] == "verified"
+
+    assert len(saved["messages"]) == 2
+
+
+def test_get_conversation_returns_persisted_history(
+    client,
+    monkeypatch,
+):
+    job = make_completed_conversation_job()
+
+    history = [
+        {
+            "id": "message-1",
+            "role": "user",
+            "content": "Explain the bug.",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        {
+            "id": "message-2",
+            "role": "assistant",
+            "content": "The special case returned the wrong value.",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+    ]
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: job,
+    )
+    monkeypatch.setattr(
+        main,
+        "load_conversation",
+        lambda job_id: history,
+    )
+
+    response = client.get(
+        f"/api/v1/repairs/{job['job_id']}/conversation"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert response.json()[0]["content"] == "Explain the bug."
+    assert response.json()[1]["role"] == "assistant"
+
+
+def test_conversation_returns_404_for_unknown_job(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: None,
+    )
+
+    job_id = uuid4()
+
+    response = client.post(
+        f"/api/v1/repairs/{job_id}/conversation",
+        json={"message": "Explain the bug."},
+    )
+
+    assert response.status_code == 404
+
+
+def test_conversation_rejects_incomplete_job(
+    client,
+    monkeypatch,
+):
+    job = make_completed_conversation_job()
+    job["state"] = "running"
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: job,
+    )
+
+    response = client.post(
+        f"/api/v1/repairs/{job['job_id']}/conversation",
+        json={"message": "Explain the bug."},
+    )
+
+    assert response.status_code == 409
+
+
+def test_conversation_rejects_invalid_messages(client):
+    job_id = uuid4()
+
+    empty_response = client.post(
+        f"/api/v1/repairs/{job_id}/conversation",
+        json={"message": ""},
+    )
+
+    oversized_response = client.post(
+        f"/api/v1/repairs/{job_id}/conversation",
+        json={"message": "A" * 4001},
+    )
+
+    assert empty_response.status_code == 422
+    assert oversized_response.status_code == 422
+
+
+def test_meta_failure_does_not_persist_partial_exchange(
+    client,
+    monkeypatch,
+):
+    job = make_completed_conversation_job()
+    existing_history = [
+        {
+            "id": "existing-message",
+            "role": "user",
+            "content": "Previous question.",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ]
+    save_called = False
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: job,
+    )
+    monkeypatch.setattr(
+        main,
+        "load_conversation",
+        lambda job_id: existing_history,
+    )
+
+    def fail_generation(**kwargs):
+        raise RuntimeError("Simulated Meta API failure")
+
+    monkeypatch.setattr(
+        main,
+        "generate_repair_answer",
+        fail_generation,
+    )
+
+    def track_save(job_id, messages):
+        nonlocal save_called
+        save_called = True
+
+    monkeypatch.setattr(
+        main,
+        "save_conversation",
+        track_save,
+    )
+
+    response = client.post(
+        f"/api/v1/repairs/{job['job_id']}/conversation",
+        json={"message": "Explain the bug."},
+    )
+
+    assert response.status_code == 502
+    assert save_called is False
+    assert len(existing_history) == 1
+
+
+def test_conversation_rejects_exchange_when_limit_reached(
+    client,
+    monkeypatch,
+):
+    job = make_completed_conversation_job()
+    existing_history = [{"role": "user"} for _ in range(40)]
+    generation_called = False
+
+    monkeypatch.setattr(
+        main,
+        "load_report",
+        lambda job_id: job,
+    )
+    monkeypatch.setattr(
+        main,
+        "load_conversation",
+        lambda job_id: existing_history,
+    )
+
+    def track_generation(**kwargs):
+        nonlocal generation_called
+        generation_called = True
+        return "Unexpected response"
+
+    monkeypatch.setattr(
+        main,
+        "generate_repair_answer",
+        track_generation,
+    )
+
+    response = client.post(
+        f"/api/v1/repairs/{job['job_id']}/conversation",
+        json={"message": "Explain the bug."},
+    )
+
+    assert response.status_code == 409
+    assert generation_called is False

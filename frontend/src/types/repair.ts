@@ -99,3 +99,18 @@ export interface RepairHistoryItem {
   summary: string | null;
   error: string | null;
 }
+
+export type ConversationRole = "user" | "assistant";
+
+export interface ConversationMessage {
+  id: string;
+  role: ConversationRole;
+  content: string;
+  created_at: string;
+}
+
+export interface ConversationResponse {
+  job_id: string;
+  messages: ConversationMessage[];
+  reply: string | null;
+}

@@ -1,0 +1,22 @@
+# Pagination
+
+A small Python project demonstrating automated bug investigation
+and evidence-backed repair with ProofLoop.
+
+## Bug
+
+The pagination function skips the first item on every page after
+the first page due to an incorrect starting index.
+
+## Expected behavior
+
+- Pages use 1-based numbering.
+- Each page returns the correct number of items.
+- The final page may contain fewer items.
+- Invalid page numbers and page sizes raise ValueError.
+
+## Run tests
+
+```bash
+pip install -r requirements.txt
+python -m pytest -q
