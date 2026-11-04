@@ -5,12 +5,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   BookOpen,
-  Code2,
   LayoutDashboard,
   Plus,
   Settings2,
   ShieldCheck,
 } from "lucide-react";
+
+import Image from "next/image";
 
 import { cn } from "@/lib/utils";
 import RecentActivity from "@/components/workspace/RecentActivity";
@@ -130,8 +131,15 @@ export default function AppSidebar() {
         href="/"
         className="flex h-[68px] shrink-0 items-center gap-3 border-b border-[#DED9D1] px-5"
       >
-        <div className="flex size-9 items-center justify-center rounded-xl bg-[#252525] text-white">
-          <Code2 className="size-[19px]" />
+        <div className="flex size-9 items-center justify-center rounded-xl bg-[#252525]">
+          <Image
+            src="/logo.svg"
+            alt="ProofLoop logo"
+            width={22}
+            height={22}
+            className="size-[22px] object-contain"
+            priority
+          />
         </div>
 
         <div className="flex items-center gap-2">
