@@ -177,7 +177,9 @@ export default function HistoryPage() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetchRepairs(controller.signal);
+    queueMicrotask(() => {
+        void fetchRepairs(controller.signal);
+    });
 
     return () => controller.abort();
   }, [fetchRepairs]);

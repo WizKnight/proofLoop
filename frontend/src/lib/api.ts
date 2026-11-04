@@ -10,8 +10,79 @@ const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_URL ?? ""
 ).replace(/\/+$/, "");
 
+const DEMO_TOKEN_KEY = "proofloop_demo_token";
+
 function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
+}
+
+/**
+ * Read the demo token from this browser tab's session.
+ */
+export function getDemoAccessToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.sessionStorage.getItem(DEMO_TOKEN_KEY);
+}
+
+/**
+ * Store the token for this tab only.
+ */
+export function storeDemoAccessToken(token: string): void {
+  window.sessionStorage.setItem(DEMO_TOKEN_KEY, token);
+}
+
+/**
+ * Lock the workspace and clear the current tab's token.
+ */
+export function clearDemoAccessToken(): void {
+  window.sessionStorage.removeItem(DEMO_TOKEN_KEY);
+}
+
+/**
+ * Verify a candidate access token with the backend.
+ */
+export async function verifyDemoAccess(
+  token: string
+): Promise<boolean> {
+  const response = await fetch(
+    apiUrl("/api/v1/auth/verify"),
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    }
+  );
+
+    if (response.status >= 500) {
+    throw new Error("The demo authentication service is unavailable.");
+  }
+
+  return response.ok;
+}
+
+/**
+ * Send authenticated requests to protected API endpoints.
+ */
+async function apiFetch(
+  path: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+
+  if (path.startsWith("/api/v1/")) {
+    const token = getDemoAccessToken();
+
+    if (token) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+
+  return fetch(apiUrl(path), {
+    ...init,
+    headers,
+  });
 }
 
 async function parseResponse<T>(
@@ -44,18 +115,15 @@ async function parseResponse<T>(
 export async function submitRepair(
   bugReport: string
 ): Promise<RepairSubmissionResponse> {
-  const response = await fetch(
-    apiUrl("/api/v1/repairs"),
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        bug_report: bugReport,
-      }),
-    }
-  );
+  const response = await apiFetch("/api/v1/repairs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bug_report: bugReport,
+    }),
+  });
 
   return parseResponse<RepairSubmissionResponse>(response);
 }
@@ -77,8 +145,8 @@ export async function submitRepositoryRepair(
   formData.append("bug_report", bugReport);
   formData.append("expected_failure", expectedFailure);
 
-  const response = await fetch(
-    apiUrl("/api/v1/repairs/repository"),
+  const response = await apiFetch(
+    "/api/v1/repairs/repository",
     {
       method: "POST",
       body: formData,
@@ -95,8 +163,8 @@ export async function getRepair(
   jobId: string,
   signal?: AbortSignal
 ): Promise<RepairJobResponse> {
-  const response = await fetch(
-    apiUrl(`/api/v1/repairs/${encodeURIComponent(jobId)}`),
+  const response = await apiFetch(
+    `/api/v1/repairs/${encodeURIComponent(jobId)}`,
     {
       method: "GET",
       cache: "no-store",
@@ -109,6 +177,7 @@ export async function getRepair(
 
 /**
  * Check whether the FastAPI backend is reachable.
+ * This endpoint intentionally remains public.
  */
 export async function checkBackendHealth(): Promise<boolean> {
   try {
@@ -138,8 +207,8 @@ export async function listRepairs(
     Math.min(Math.floor(limit), 100)
   );
 
-  const response = await fetch(
-    apiUrl(`/api/v1/repairs?limit=${safeLimit}`),
+  const response = await apiFetch(
+    `/api/v1/repairs?limit=${safeLimit}`,
     {
       method: "GET",
       cache: "no-store",
@@ -157,10 +226,8 @@ export async function getRepairConversation(
   jobId: string,
   signal?: AbortSignal
 ): Promise<ConversationMessage[]> {
-  const response = await fetch(
-    apiUrl(
-      `/api/v1/repairs/${encodeURIComponent(jobId)}/conversation`
-    ),
+  const response = await apiFetch(
+    `/api/v1/repairs/${encodeURIComponent(jobId)}/conversation`,
     {
       method: "GET",
       cache: "no-store",
@@ -179,16 +246,17 @@ export async function sendRepairMessage(
   message: string,
   clientRequestId: string
 ): Promise<ConversationResponse> {
-  const response = await fetch(
-    apiUrl(
-      `/api/v1/repairs/${encodeURIComponent(jobId)}/conversation`
-    ),
+  const response = await apiFetch(
+    `/api/v1/repairs/${encodeURIComponent(jobId)}/conversation`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message, client_request_id: clientRequestId, }),
+      body: JSON.stringify({
+        message,
+        client_request_id: clientRequestId,
+      }),
     }
   );
 

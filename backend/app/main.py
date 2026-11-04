@@ -4,6 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import UUID, uuid4
+import hmac
+import os
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from fastapi import (
     BackgroundTasks,
@@ -61,6 +66,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
+        "https://proofloop-xi.vercel.app",
     ],
     allow_credentials=False,
     allow_methods=[
@@ -69,9 +75,42 @@ app.add_middleware(
         "OPTIONS",
     ],
     allow_headers=[
-        "Content-Type",
-    ],
+        "Content-Type", "Authorization"
+    ]
 )
+
+@app.middleware("http")
+async def require_demo_access(request: Request, call_next):
+    path = request.url.path
+
+    # Health checks and CORS preflight requests remain public.
+    if request.method == "OPTIONS" or not (
+        path == "/api/v1" or path.startswith("/api/v1/")
+    ):
+        return await call_next(request)
+
+    configured_token = os.getenv("PROOFLOOP_DEMO_TOKEN", "")
+    if not configured_token:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Demo access is not configured."},
+        )
+
+    authorization = request.headers.get("Authorization", "")
+    scheme, separator, supplied_token = authorization.partition(" ")
+
+    if (
+        scheme.lower() != "bearer"
+        or not separator
+        or not supplied_token
+        or not hmac.compare_digest(supplied_token, configured_token)
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "A valid demo access code is required."},
+        )
+
+    return await call_next(request)
 
 class RepairRequest(BaseModel):
     """Request to repair the controlled ProofLoop demo fixture."""
@@ -220,6 +259,11 @@ def execute_repository_repair_job(
 def health_check() -> HealthResponse:
     """Confirm that the API process is responsive."""
     return HealthResponse(status="ok")
+
+@app.get("/api/v1/auth/verify", tags=["Authentication"])
+def verify_demo_access() -> dict[str, bool]:
+    """Confirm that the supplied demo access token is valid."""
+    return {"authenticated": True}
 
 
 @app.post(

@@ -159,7 +159,9 @@ export default function RecentActivity() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void loadRepairs(controller.signal);
+    queueMicrotask(() => {
+      void loadRepairs(controller.signal);
+    });
 
     return () => controller.abort();
   }, [loadRepairs]);

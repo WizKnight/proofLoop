@@ -8,8 +8,8 @@ interface WorkspaceDashboardProps {
 }
 
 export default function WorkspaceDashboard({
-  historyJobId,
-  onHistorySelectionCleared,
+  historyJobId: _historyJobId,
+  onHistorySelectionCleared: _onHistorySelectionCleared,
 }: WorkspaceDashboardProps) {
   return (
     <RepairWorkspace

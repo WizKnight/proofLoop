@@ -2,8 +2,6 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleHelp,
-  Clock3,
-  Terminal,
 } from "lucide-react";
 
 import {

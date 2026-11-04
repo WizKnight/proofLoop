@@ -7,8 +7,14 @@ from backend.app import main
 
 
 @pytest.fixture
-def client():
-    return TestClient(main.app)
+def client(monkeypatch):
+    test_token = "proofloop-test-token"
+    monkeypatch.setenv("PROOFLOOP_DEMO_TOKEN", test_token)
+
+    return TestClient(
+        main.app,
+        headers={"Authorization": f"Bearer {test_token}"},
+    )
 
 
 def make_verified_report():
@@ -1040,3 +1046,40 @@ def test_conversation_rejects_exchange_when_limit_reached(
 
     assert response.status_code == 409
     assert generation_called is False
+
+
+def test_auth_verify_accepts_valid_demo_token(client):
+    response = client.get("/api/v1/auth/verify")
+
+    assert response.status_code == 200
+    assert response.json() == {"authenticated": True}
+
+
+def test_protected_api_rejects_missing_token(monkeypatch):
+    monkeypatch.setenv("PROOFLOOP_DEMO_TOKEN", "expected-token")
+    unauthenticated_client = TestClient(main.app)
+
+    response = unauthenticated_client.get("/api/v1/repairs")
+
+    assert response.status_code == 401
+
+
+def test_protected_api_rejects_invalid_token(monkeypatch):
+    monkeypatch.setenv("PROOFLOOP_DEMO_TOKEN", "expected-token")
+    unauthenticated_client = TestClient(
+        main.app,
+        headers={"Authorization": "Bearer wrong-token"},
+    )
+
+    response = unauthenticated_client.get("/api/v1/repairs")
+
+    assert response.status_code == 401
+
+
+def test_protected_api_fails_closed_without_configured_token(monkeypatch):
+    monkeypatch.delenv("PROOFLOOP_DEMO_TOKEN", raising=False)
+    unauthenticated_client = TestClient(main.app)
+
+    response = unauthenticated_client.get("/api/v1/repairs")
+
+    assert response.status_code == 503

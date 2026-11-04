@@ -177,9 +177,8 @@ function formatDate(value: string) {
   }).format(date);
 }
 
-function EvidenceRecord({ entry, index }: {
+function EvidenceRecord({ entry }: {
   entry: EvidenceEntry;
-  index: number;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -421,14 +420,16 @@ export default function EvidencePage() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetchRepairs(controller.signal);
+    queueMicrotask(() => {
+        void fetchRepairs(controller.signal);
+    });
 
     return () => controller.abort();
   }, [fetchRepairs]);
 
   useEffect(() => {
     if (!selectedId) {
-      setSelectedJob(null);
+      queueMicrotask(() => setSelectedJob(null));
       return;
     }
 
@@ -495,7 +496,9 @@ export default function EvidencePage() {
     });
   }, [repairs, search]);
 
-  const evidence = selectedJob?.report?.evidence ?? [];
+  const evidence = useMemo(() => {
+    return selectedJob?.report?.evidence ?? [];
+  }, [selectedJob]);
 
   const filteredEvidence = useMemo(() => {
     if (stageFilter === "all") return evidence;
@@ -810,7 +813,6 @@ export default function EvidencePage() {
                           <EvidenceRecord
                             key={`${entry.step}-${index}`}
                             entry={entry}
-                            index={index}
                           />
                         ))}
                       </div>
@@ -853,28 +855,5 @@ export default function EvidencePage() {
         </p>
       </div>
     </AppShell>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: number;
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="rounded-2xl border border-[#EAE7E2] bg-white p-4 shadow-[0_4px_20px_rgba(35,30,20,0.02)]">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-[#89847D]">{label}</p>
-        <Icon className="size-4 text-[#A49D93]" />
-      </div>
-
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-[#292724] tabular-nums">
-        {value}
-      </p>
-    </div>
   );
 }
