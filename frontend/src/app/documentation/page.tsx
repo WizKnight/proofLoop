@@ -11,7 +11,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Terminal,
-  Workflow,
 } from "lucide-react";
 
 import AppShell from "@/components/layout/AppShell";
@@ -164,7 +163,7 @@ export default function DocumentationPage() {
             </p>
 
             <p className="mt-3 text-sm leading-7 text-[#57534E]">
-              It's central principle is evidence-backed verification: a
+              It&apos;s central principle is evidence-backed verification: a
               proposed fix should not be presented as verified unless the
               recorded execution evidence supports that result.
             </p>
@@ -191,7 +190,7 @@ export default function DocumentationPage() {
           />
 
           <div className="space-y-3">
-            {workflow.map((step, index) => {
+            {workflow.map((step, _index) => {
               const Icon = step.icon;
 
               return (

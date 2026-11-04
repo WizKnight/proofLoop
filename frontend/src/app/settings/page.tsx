@@ -46,7 +46,9 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => {
-    void checkConnection();
+    queueMicrotask(() => {
+        void checkConnection();
+    });
   }, [checkConnection]);
 
   const status = {

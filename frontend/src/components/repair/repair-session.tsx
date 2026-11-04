@@ -100,6 +100,7 @@ export default function RepairSession({ jobId }: RepairSessionProps) {
     let consecutiveErrors = 0;
 
     async function fetchRepair() {
+      setLoading(true);
       try {
         const result = await getRepair(jobId, controller.signal);
 
@@ -138,7 +139,6 @@ export default function RepairSession({ jobId }: RepairSessionProps) {
       }
     }
 
-    setLoading(true);
     void fetchRepair();
 
     return () => {
@@ -362,7 +362,7 @@ export default function RepairSession({ jobId }: RepairSessionProps) {
           </h2>
 
           <p className="mt-1 text-xs text-[#89847D]">
-            We couldn't retrieve this repair. Check your connection and try again.
+            We couldn&apos;t retrieve this repair. Check your connection and try again.
           </p>
 
           <button

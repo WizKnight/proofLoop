@@ -117,7 +117,9 @@ export default function OverviewActivityPanel() {
   useEffect(() => {
     const controller = new AbortController();
 
-    void fetchRepairs(controller.signal);
+    queueMicrotask(() => {
+        void fetchRepairs(controller.signal);
+    });
 
     const intervalId = window.setInterval(() => {
       void fetchRepairs();

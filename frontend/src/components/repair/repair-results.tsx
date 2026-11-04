@@ -1,8 +1,6 @@
 import {
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
-  Settings,
   Settings2,
   ShieldCheck,
   Terminal,
