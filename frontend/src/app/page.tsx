@@ -1,42 +1,42 @@
 "use client";
 
-import { useState } from "react";
-
 import AppShell from "@/components/layout/AppShell";
 import WorkspaceDashboard from "@/components/workspace/WorkspaceDashboard";
-import OverviewActivityPanel from "@/components/workspace/OverviewActivityPanel";
 
 export default function Home() {
-  const [historyJobId, setHistoryJobId] = useState<string | null>(null);
-
-  const handleClearHistory = () => {
-    setHistoryJobId(null);
-  };
   return (
     <AppShell
-      title="Overview"
-      description="Evidence-first code repair"
-      aside={<OverviewActivityPanel />}
+      showHeader={false}
+      centered
     >
-      <div className="mb-7 space-y-3">
-        <div className="eyebrow">
-          <span className="eyebrow-mark" />
-          AI-powered software repair
+      <div className="space-y-10 mt-10">
+        {/* Hero */}
+        <header className="mx-auto max-w-xl space-y-4 text-center">
+          <div className="eyebrow justify-center">
+            <span className="eyebrow-mark" />
+            AI-powered bug repair
+          </div>
+
+          <div className="page-heading space-y-2">
+            <h1>What should we fix today?</h1>
+
+            <p>
+              An AI coding agent that investigates bugs, applies patches,
+              and checks fixes through real test execution.
+            </p>
+          </div>
+        </header>
+
+        {/* Repair workspace */}
+        <div className="w-full">
+          <WorkspaceDashboard historyJobId={null} onHistorySelectionCleared={function (): void {
+            throw new Error("Function not implemented.");
+          } } />
         </div>
 
-        <div className="page-heading">
-          <h1>What should we fix today?</h1>
-          <p>
-            Your AI coding agent for investigating bugs,
-            generating patches, and proving fixes through
-            real execution evidence.
-          </p>
-        </div>
-
-        <WorkspaceDashboard historyJobId={historyJobId} onHistorySelectionCleared={handleClearHistory} />
-
-        <footer className="footer">
-          ProofLoop · Evidence-first AI software repair
+        {/* Footer */}
+        <footer className="pt-2 text-center text-[12px] text-black/85">
+          ProofLoop · Evidence-first AI bug repair
         </footer>
       </div>
     </AppShell>

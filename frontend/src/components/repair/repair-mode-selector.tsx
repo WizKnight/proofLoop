@@ -35,15 +35,15 @@ export default function RepairModeSelector({
     <section className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-[13px] font-semibold tracking-tight text-[#292724]">
+          <h2 className="text-[13px] font-semibold tracking-tight text-[#0180fa]">
             Choose your workflow
           </h2>
-          <p className="mt-1 text-xs text-[#89847D]">
+          <p className="mt-1 text-xs text-black">
             How should ProofLoop investigate your problem?
           </p>
         </div>
 
-        <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-[#A19A90] sm:inline">
+        <span className="hidden text-[10px] font-medium uppercase tracking-[0.12em] text-black-80 sm:inline">
           Select a mode
         </span>
       </div>
@@ -62,15 +62,15 @@ export default function RepairModeSelector({
               onClick={() => onModeChange(workflow.id)}
               className={`group relative flex min-h-[104px] items-start gap-3 rounded-xl border p-3.5 text-left transition-all duration-200 ${
                 selected
-                  ? "border-[#C9C0F1] bg-[#F8F6FF] shadow-[0_2px_8px_rgba(89,70,160,0.045)]"
-                  : "border-[#EAE7E2] bg-white/65 hover:border-[#D8D2E8] hover:bg-white"
+                  ? "border-[#0180fa]/50 bg-orange-50 shadow-[0_2px_8px_rgba(89,70,160,0.045)]"
+                  : "border-[#F4F2EF] bg-white/65 hover:border-[#D8D2E8] hover:bg-white"
               } disabled:pointer-events-none disabled:opacity-50`}
             >
               <div
                 className={`flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
                   selected
-                    ? "bg-[#EAE5FF] text-[#7665D8]"
-                    : "bg-[#F4F2EF] text-[#77716A] group-hover:bg-[#EEEBF6]"
+                    ? "bg-orange-400 text-black/80"
+                    : "bg-[#F4F2EF] text-black/80 group-hover:bg-orange-200"
                 }`}
               >
                 <Icon className="size-[17px]" strokeWidth={1.8} />
@@ -78,18 +78,18 @@ export default function RepairModeSelector({
 
               <div className="min-w-0 flex-1 pt-0.5">
                 <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-[12px] font-semibold text-[#34312D]">
+                  <h3 className="text-[13px] font-semibold text-[#34312D]">
                     {workflow.title}
                   </h3>
 
                   {selected && (
-                    <span className="flex size-[19px] shrink-0 items-center justify-center rounded-full bg-[#7665D8] text-white">
+                    <span className="flex size-[19px] shrink-0 items-center justify-center rounded-full bg-[#0180fa] text-white">
                       <Check className="size-3" strokeWidth={2.5} />
                     </span>
                   )}
                 </div>
 
-                <p className="mt-1.5 text-[11px] leading-[1.55] text-[#89847D]">
+                <p className="mt-1.5 text-[12px] leading-[1.55] text-black/75">
                   {workflow.description}
                 </p>
               </div>

@@ -143,6 +143,19 @@ export default function RepairWorkspace() {
             )
           : await submitRepair(description);
 
+      // Reset the form after the backend accepts the repair.
+      setMode("demo");
+      setBugReport("");
+      setExpectedFailure("");
+      setRepositoryFile(null);
+      setError(null);
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      setSubmitting(false);
+
       // Navigate to the dedicated repair session.
       router.push(
         `/repairs/${encodeURIComponent(response.job_id)}`

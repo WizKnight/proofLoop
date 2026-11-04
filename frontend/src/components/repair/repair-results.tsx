@@ -1,12 +1,19 @@
-
 import {
   AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  Settings,
+  Settings2,
   ShieldCheck,
   Terminal,
+  XCircle,
 } from "lucide-react";
 
+import { Accordion } from "@/components/ui/accordion";
 import {
-  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
 } from "@/components/ui/accordion";
 
 import { Badge } from "@/components/ui/badge";
@@ -33,17 +40,21 @@ export default function RepairResults({ job }: RepairResultsProps) {
 
   if (job.state === "failed") {
     return (
-      <Card className="mt-5 border-red-500/30">
-        <CardContent className="flex gap-3 p-4">
-          <AlertCircle className="mt-0.5 size-5 shrink-0 text-red-500" />
+      <Card className="border-red-500/25">
+        <CardContent className="flex items-start gap-3 p-5">
+          <XCircle className="mt-0.5 size-5 shrink-0 text-red-600" />
 
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-foreground">
-              Repair job failed
+              Repair execution failed
             </h3>
 
             <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
               {job.error ?? "The repair could not be completed."}
+            </p>
+
+            <p className="mt-2 text-xs text-muted-foreground">
+              This execution did not produce a completed repair result.
             </p>
           </div>
         </CardContent>
@@ -56,95 +67,118 @@ export default function RepairResults({ job }: RepairResultsProps) {
   }
 
   const verified = report.status === "verified";
-  const scope = report.verification_scope;
   const evidence = report.evidence ?? [];
 
+  const baseline = [...evidence]
+    .reverse()
+    .find((entry) => entry.step === "baseline_tests");
+
+  const postPatch = [...evidence]
+    .reverse()
+    .find((entry) => entry.step === "post_patch_tests");
+
+  const baselineReproduced =
+    baseline?.failure_reproduced === true;
+
+  const regressionPassed =
+    postPatch?.tests_passed ??
+    (postPatch?.exit_code === 0 ? true : undefined);
+
+  const hasAnalysis =
+    Boolean(report.root_cause) ||
+    Boolean(report.patch_summary) ||
+    Boolean(report.verification_scope) ||
+    Boolean(report.error);
+
   return (
-    <div className="mt-5 space-y-3">
-      {/* Verification summary */}
+    <div className="space-y-4">
+      {/* Primary verification outcome */}
       <Card
-        className={
+        className={`overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white py-0 shadow-sm ring-0 ${
           verified
-            ? "border-emerald-500/30 bg-emerald-500/[0.025]"
-            : "border-amber-500/30 bg-amber-500/[0.025]"
-        }
+            ? "bg-white"
+            : "bg-amber-500/[0.035]"
+        }`}
       >
-        <CardContent className="flex items-start gap-3 p-4">
-          <div
-            className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${
-              verified
-                ? "bg-emerald-500/10 text-emerald-600"
-                : "bg-amber-500/10 text-amber-600"
-            }`}
-          >
-            {verified ? (
-              <ShieldCheck className="size-5" />
-            ) : (
-              <AlertCircle className="size-5" />
-            )}
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-foreground">
-                {verified ? "Fix verified" : "Fix unverified"}
-              </h3>
-
-              <Badge variant={verified ? "outline" : "secondary"}>
-                {report.status}
-              </Badge>
+        <CardContent className="p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div
+              className={`flex size-11 shrink-0 items-center justify-center rounded-xl ${
+                verified
+                  ? "bg-green-500/10 text-green-600"
+                  : "bg-amber-500/10 text-amber-600"
+              }`}
+            >
+              {verified ? (
+                <ShieldCheck className="size-6" />
+              ) : (
+                <AlertCircle className="size-6" />
+              )}
             </div>
 
-            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-              {report.summary}
-            </p>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold tracking-tight text-foreground sm:text-lg">
+                  {verified ? "Fix verified" : "Fix unverified"}
+                </h2>
+
+                <Badge variant={verified ? "outline" : "secondary"}>
+                  {report.status}
+                </Badge>
+              </div>
+
+              <p className="mt-1.5 text-sm leading-relaxed text-foreground">
+                {report.summary}
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2">
+                <span
+                  className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                    baselineReproduced
+                      ? "text-emerald-700"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {baselineReproduced ? (
+                    <CheckCircle2 className="size-3.5" />
+                  ) : (
+                    <AlertCircle className="size-3.5" />
+                  )}
+                  Baseline{" "}
+                  {baselineReproduced ? "reproduced" : "not confirmed"}
+                </span>
+
+                <span
+                  className={`inline-flex items-center gap-1.5 text-[11px] font-medium ${
+                    regressionPassed === true
+                      ? "text-emerald-700"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  {regressionPassed === true ? (
+                    <CheckCircle2 className="size-3.5" />
+                  ) : (
+                    <AlertCircle className="size-3.5" />
+                  )}
+                  Regression{" "}
+                  {regressionPassed === true
+                    ? "tests passed"
+                    : regressionPassed === false
+                      ? "tests failed"
+                      : "outcome not confirmed"}
+                </span>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Repair analysis */}
-      {(report.root_cause || report.patch_summary) && (
-        <Card>
-          <CardHeader className="px-4 pb-2 pt-4">
-            <CardTitle className="text-sm">
-              Repair analysis
-            </CardTitle>
-          </CardHeader>
-
-          <CardContent className="grid gap-4 px-4 pb-4 sm:grid-cols-2">
-            {report.root_cause && (
-              <div className="min-w-0">
-                <p className="mb-1.5 text-xs font-semibold text-muted-foreground">
-                  Root cause
-                </p>
-
-                <p className="text-sm leading-relaxed text-foreground">
-                  {report.root_cause}
-                </p>
-              </div>
-            )}
-
-            {report.patch_summary && (
-              <div className="min-w-0 sm:border-l sm:border-border sm:pl-4">
-                <p className="mb-1.5 text-xs font-semibold text-muted-foreground">
-                  Patch overview
-                </p>
-
-                <p className="text-sm leading-relaxed text-foreground">
-                  {report.patch_summary}
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Changed files and source diff */}
+      {/* Actual source changes */}
       <FileDiffViewer report={report} />
 
       {/* Execution evidence */}
-      <Card>
-        <CardHeader className="px-4 pb-3 pt-4">
+      <Card className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white py-0 shadow-sm ring-0">
+        <CardHeader className="px-4 pb-3 pt-5 sm:px-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Terminal className="size-4 text-muted-foreground" />
@@ -152,16 +186,16 @@ export default function RepairResults({ job }: RepairResultsProps) {
             </CardTitle>
 
             <Badge variant="secondary">
-              {evidence.length} recorded steps
+              {evidence.length} {evidence.length === 1 ? "step" : "steps"}
             </Badge>
           </div>
 
           <CardDescription className="text-xs">
-            Inspect test results, execution logs, integrity data, and other recorded evidence.
+            Inspect the actual execution records supporting this repair.
           </CardDescription>
         </CardHeader>
 
-        <CardContent className="px-4 pb-4 pt-0">
+        <CardContent className="px-4 pb-4 pt-0 sm:px-5">
           {evidence.length > 0 ? (
             <Accordion className="w-full">
               {evidence.map((entry, index) => (
@@ -173,45 +207,90 @@ export default function RepairResults({ job }: RepairResultsProps) {
               ))}
             </Accordion>
           ) : (
-            <p className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground">
               No execution evidence was recorded in this report.
             </p>
           )}
         </CardContent>
       </Card>
 
-      {/* Verification scope and additional information */}
-      {(scope || report.error) && (
-        <Card>
-          <CardContent className="space-y-4 p-4">
-            {scope && (
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">
-                  Verification scope
-                </h3>
+      {/* Additional repair details */}
+      {hasAnalysis && (
+      <Card className="overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white py-0 shadow-sm ring-0">          
+        <Accordion className="w-full">
+            <AccordionItem value="repair-details" className="border-b-0">
+              <AccordionTrigger className="px-5 py-5 hover:no-underline sm:px-6">
+                <div className="flex min-w-0 items-center gap-3 text-left">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                    <Settings2 className="size-4" />
+                  </div>
 
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                  {Array.isArray(scope) ? scope.join(" ") : scope}
-                </p>
-              </div>
-            )}
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">
+                      Repair analysis and verification details
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Root cause, patch explanation, and test scope
+                    </p>
+                  </div>
+                </div>
+              </AccordionTrigger>
 
-            {scope && report.error && (
-              <div className="border-t border-border" />
-            )}
+              <AccordionContent>
+                <div className="space-y-4 border-t border-[#E5E7EB] px-5 py-5 sm:px-6">
+                  {report.root_cause && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-foreground">
+                        Root cause
+                      </h3>
 
-            {report.error && (
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">
-                  Additional information
-                </h3>
+                      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                        {report.root_cause}
+                      </p>
+                    </div>
+                  )}
 
-                <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
-                  {report.error}
-                </p>
-              </div>
-            )}
-          </CardContent>
+                  {report.patch_summary && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-foreground">
+                        Patch explanation
+                      </h3>
+
+                      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                        {report.patch_summary}
+                      </p>
+                    </div>
+                  )}
+
+                  {report.verification_scope && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-foreground">
+                        Verification scope
+                      </h3>
+
+                      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                        {Array.isArray(report.verification_scope)
+                          ? report.verification_scope.join(" ")
+                          : report.verification_scope}
+                      </p>
+                    </div>
+                  )}
+
+                  {report.error && (
+                    <div>
+                      <h3 className="text-xs font-semibold text-foreground">
+                        Additional information
+                      </h3>
+
+                      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                        {report.error}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </Card>
       )}
     </div>

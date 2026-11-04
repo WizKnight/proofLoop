@@ -10,7 +10,6 @@ import {
   X,
 } from "lucide-react";
 
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -36,6 +35,18 @@ interface RepairFormProps {
   active: boolean;
 
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(2)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 export default function RepairForm({
@@ -70,12 +81,12 @@ export default function RepairForm({
 
       <form
         onSubmit={onSubmit}
-        className="overflow-hidden rounded-2xl border border-[#E7E3DD] bg-white shadow-[0_8px_30px_rgba(40,32,20,0.035)] transition-all duration-200 focus-within:border-[#C9C0F1] focus-within:shadow-[0_0_0_3px_rgba(118,101,216,0.07)]"
+        className="overflow-hidden rounded-2xl border border-[#E7E3DD] bg-white shadow-[0_8px_30px_rgba(40,32,20,0.065)] transition-all duration-200"
       >
         {/* Composer heading */}
         <div className="flex items-center justify-between gap-3 px-5 pb-3 pt-5 sm:px-6 sm:pt-6">
           <div className="flex items-center gap-2.5">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-[#F3F0EB] text-[#706A62]">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-blue-50 text-black">
               <FileCode2 className="size-4" strokeWidth={1.8} />
             </div>
 
@@ -83,7 +94,7 @@ export default function RepairForm({
               <p className="text-[13px] font-semibold tracking-tight text-[#292724]">
                 New repair
               </p>
-              <p className="mt-0.5 text-[11px] text-[#89847D]">
+              <p className="mt-0.5 text-[12px] text-black/75">
                 {mode === "demo"
                   ? "Describe the problem you want to solve."
                   : "Upload your project and identify the failing test."}
@@ -91,7 +102,7 @@ export default function RepairForm({
             </div>
           </div>
 
-          <span className="hidden rounded-full border border-[#EAE7E2] px-2.5 py-1 text-[10px] font-medium text-[#89847D] sm:inline-flex">
+          <span className="hidden rounded-full border border-[#EAE7E2] bg-[#b9ff37] px-2.5 py-1 text-[10px] font-medium text-black/80 sm:inline-flex">
             {mode === "demo" ? "Bug investigation" : "Repository repair"}
           </span>
         </div>
@@ -120,7 +131,7 @@ export default function RepairForm({
                     {repositoryFile.name}
                   </p>
                   <p className="mt-1 text-[10px] text-[#89847D]">
-                    {(repositoryFile.size / (1024 * 1024)).toFixed(2)} MB
+                    {formatFileSize(repositoryFile.size)}
                     {" · "}ZIP archive
                   </p>
                 </div>
@@ -155,15 +166,15 @@ export default function RepairForm({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-[#34312D]">
+                  <p className="text-sm font-semibold text-[#34312D]">
                     Choose a Python repository
                   </p>
-                  <p className="mt-1 text-[10px] text-[#89847D]">
+                  <p className="mt-1 text-[11px] text-[#89847D]">
                     ZIP archive · Maximum 25 MB
                   </p>
                 </div>
 
-                <span className="rounded-lg border border-[#E7E2DA] bg-white px-3 py-1.5 text-[10px] font-semibold text-[#625B52]">
+                <span className="rounded-lg border border-[#E7E2DA] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#625B52]">
                   Browse
                 </span>
               </label>
@@ -176,7 +187,7 @@ export default function RepairForm({
           <div className="mb-2 flex items-center justify-between gap-3">
             <Label
               htmlFor="bug-report"
-              className="text-[11px] font-semibold text-[#5F5A52]"
+              className="text-[12px] font-semibold text-[#5F5A52]"
             >
               {mode === "demo" ? "Describe the bug" : "What needs to be fixed?"}
             </Label>
@@ -185,14 +196,14 @@ export default function RepairForm({
               className={`text-[10px] tabular-nums ${
                 bugReport.length > 4000
                   ? "text-red-600"
-                  : "text-[#A19A90]"
+                  : "text-black/75"
               }`}
             >
               {bugReport.length.toLocaleString()} / 4,000
             </span>
           </div>
 
-          <Textarea
+          <textarea
             id="bug-report"
             value={bugReport}
             onChange={(event) => onBugReportChange(event.target.value)}
@@ -203,10 +214,10 @@ Example: calculate_discount returns the original price when discount_percent is 
             maxLength={4000}
             required
             disabled={disabled}
-            className="min-h-[145px] resize-y rounded-xl border-[#ECE8E2] bg-[#FCFBF9] px-4 py-3 text-[12px] leading-[1.8] text-[#34312D] shadow-none placeholder:text-[#AAA49A] focus-visible:border-[#C9C0F1] focus-visible:ring-2 focus-visible:ring-[#7665D8]/10 sm:min-h-[155px]"
+            style={{ outline: "none", boxShadow: "none" }}
+            className="min-h-[145px] w-full resize-y rounded-xl border border-[#E5E0D8] bg-[#FCFBF9] px-4 py-3 text-[12px] leading-[1.8] text-[#34312D] placeholder:text-[#AAA49A] transition-colors duration-200 focus:border-[#0180fa] focus:outline-none focus:ring-0 sm:min-h-[155px]"
           />
-
-          <p className="mt-2 text-[10px] leading-relaxed text-[#969087]">
+          <p className="mt-2 text-[11px] leading-relaxed text-black/75">
             Be specific about the expected behaviour and the observed failure.
           </p>
         </div>
@@ -217,7 +228,7 @@ Example: calculate_discount returns the original price when discount_percent is 
             <div className="space-y-2">
               <Label
                 htmlFor="expected-failure"
-                className="text-[11px] font-semibold text-[#5F5A52]"
+                className="text-[12px] font-semibold text-[#5F5A52]"
               >
                 Expected failure marker
               </Label>
@@ -233,10 +244,11 @@ Example: calculate_discount returns the original price when discount_percent is 
                 maxLength={300}
                 required
                 disabled={disabled}
-                className="h-10 rounded-xl border-[#ECE8E2] bg-[#FCFBF9] text-xs shadow-none placeholder:text-[#AAA49A] focus-visible:border-[#C9C0F1] focus-visible:ring-2 focus-visible:ring-[#7665D8]/10"
-              />
+                style={{ outline: "none", boxShadow: "none" }}
+                className="h-10 w-full rounded-xl border border-[#E5E0D8] bg-[#FCFBF9] px-3 text-xs text-[#34312D] placeholder:text-[#AAA49A] transition-colors duration-200 focus:border-[#0180fa] focus:outline-none focus:ring-0"              
+                />
 
-              <p className="text-[10px] leading-relaxed text-[#969087]">
+              <p className="text-[11px] leading-relaxed text-black/75">
                 A distinctive message expected in the failing baseline test output.
               </p>
             </div>
@@ -245,8 +257,8 @@ Example: calculate_discount returns the original price when discount_percent is 
 
         {/* Composer actions */}
         <div className="flex flex-col gap-3 border-t border-[#EEEAE5] bg-[#FDFCFA] px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="flex min-w-0 items-center gap-2 text-[10px] text-[#817B73]">
-            <ShieldCheck className="size-3.5 shrink-0 text-[#27966B]" />
+          <div className="flex min-w-0 items-center gap-2 text-[11px] text-black/80">
+            <ShieldCheck className="size-3.5 shrink-0 text-green-400" />
             <span>Execution-backed verification</span>
             <span className="text-[#C2BCB2]">·</span>
             <span className="truncate">
