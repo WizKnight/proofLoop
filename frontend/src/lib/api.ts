@@ -10,78 +10,21 @@ const API_BASE_URL = (
   process.env.NEXT_PUBLIC_API_URL ?? ""
 ).replace(/\/+$/, "");
 
-const DEMO_TOKEN_KEY = "proofloop_demo_token";
 
 function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
 
 /**
- * Read the demo token from this browser tab's session.
- */
-export function getDemoAccessToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.sessionStorage.getItem(DEMO_TOKEN_KEY);
-}
-
-/**
- * Store the token for this tab only.
- */
-export function storeDemoAccessToken(token: string): void {
-  window.sessionStorage.setItem(DEMO_TOKEN_KEY, token);
-}
-
-/**
- * Lock the workspace and clear the current tab's token.
- */
-export function clearDemoAccessToken(): void {
-  window.sessionStorage.removeItem(DEMO_TOKEN_KEY);
-}
-
-/**
- * Verify a candidate access token with the backend.
- */
-export async function verifyDemoAccess(
-  token: string
-): Promise<boolean> {
-  const response = await fetch(
-    apiUrl("/api/v1/auth/verify"),
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    }
-  );
-
-    if (response.status >= 500) {
-    throw new Error("The demo authentication service is unavailable.");
-  }
-
-  return response.ok;
-}
-
-/**
- * Send authenticated requests to protected API endpoints.
+ * Send requests to the local ProofLoop backend.
  */
 async function apiFetch(
   path: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  const headers = new Headers(init.headers);
-
-  if (path.startsWith("/api/v1/")) {
-    const token = getDemoAccessToken();
-
-    if (token) {
-      headers.set("Authorization", `Bearer ${token}`);
-    }
-  }
-
   return fetch(apiUrl(path), {
     ...init,
-    headers,
+    headers: new Headers(init.headers),
   });
 }
 

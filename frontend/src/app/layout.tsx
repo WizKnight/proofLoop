@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import DemoAccessGate from "@/components/auth/DemoAccessGate";
 import "./globals.css";
 
 const geist = Geist({
@@ -27,7 +26,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geist.variable} ${geistMono.variable}`}>
-        <DemoAccessGate>{children}</DemoAccessGate>
+        {children}
       </body>
     </html>
   );

@@ -5,6 +5,7 @@ import threading
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any
+import os
 
 from backend.app.schemas.execution import ExecutionResult
 from backend.app.schemas.patch import FileEdit
@@ -109,6 +110,11 @@ def create_workspace(
     destination_root = Path(workspace.name)
 
     try:
+        # Docker runs as an unprivileged user on Linux.
+        # Make the temporary workspace traversable.
+        if os.name == "posix":
+            os.chmod(destination_root, 0o755)
+
         for relative_path in relative_paths:
             source = _safe_file(source_root, relative_path)
 
@@ -117,15 +123,24 @@ def create_workspace(
                     f"Approved source must be a regular file: {relative_path}"
                 )
 
-            destination = _safe_file(
-                destination_root,
-                relative_path,
-            )
+            destination = _safe_file(destination_root, relative_path)
 
             destination.parent.mkdir(
                 parents=True,
                 exist_ok=True,
             )
+
+            if os.name == "posix":
+                # Chmod only directories inside this workspace.
+                relative_parts = destination.relative_to(
+                    destination_root
+                ).parts[:-1]
+
+                current = destination_root
+
+                for part in relative_parts:
+                    current = current / part
+                    os.chmod(current, 0o755)
 
             # Revalidate the source after directory creation.
             source = _safe_file(source_root, relative_path)
@@ -136,6 +151,10 @@ def create_workspace(
                 )
 
             shutil.copyfile(source, destination)
+
+            # Allow the unprivileged sandbox user to read approved files.
+            if os.name == "posix":
+                os.chmod(destination, 0o644)
 
         return workspace
 
@@ -213,6 +232,58 @@ def apply_edit(
         newline="",
     )
 
+
+def _check_docker_ready() -> None:
+    """Check Docker daemon and sandbox image before executing tests."""
+    try:
+        docker_info = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Docker CLI was not found. Install Docker Desktop or Docker Engine "
+            "and ensure docker is available in PATH."
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "Docker did not respond within 15 seconds. "
+            "Check whether the Docker daemon is running."
+        ) from exc
+
+    if docker_info.returncode != 0:
+        details = (
+            docker_info.stderr.strip()
+            or docker_info.stdout.strip()
+            or "No diagnostic output was returned."
+        )
+        raise RuntimeError(
+            "Docker daemon is unavailable. Start Docker Desktop or Docker "
+            f"Engine and try again. Details: {details}"
+        )
+
+    try:
+        image_result = subprocess.run(
+            ["docker", "image", "inspect", SANDBOX_IMAGE],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            "Timed out while checking the ProofLoop sandbox image."
+        ) from exc
+
+    if image_result.returncode != 0:
+        raise RuntimeError(
+            f"Sandbox image '{SANDBOX_IMAGE}' is missing. "
+            "From the ProofLoop repository root, run: "
+            "python backend/scripts/setup_sandbox.py"
+        )
 
 
 def _build_docker_command(
@@ -372,6 +443,7 @@ def _build_execution_result(
 
 
 
+
 def run_pytest(
     workspace_root: Path,
     test_path: str | list[str],
@@ -410,9 +482,7 @@ def run_pytest(
             )
 
     execution_id = uuid.uuid4()
-    container_name = (
-        f"proofloop-test-{uuid.uuid4().hex[:12]}"
-    )
+    container_name = f"proofloop-test-{uuid.uuid4().hex[:12]}"
 
     command = _build_docker_command(
         workspace_root,
@@ -429,6 +499,7 @@ def run_pytest(
     exit_code = None
 
     try:
+        # Execute directly inside Docker. Never fall back to host execution.
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -442,9 +513,7 @@ def run_pytest(
         )
 
         try:
-            exit_code = process.wait(
-                timeout=timeout_seconds,
-            )
+            exit_code = process.wait(timeout=timeout_seconds)
 
         except subprocess.TimeoutExpired:
             timed_out = True

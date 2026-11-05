@@ -56,6 +56,12 @@ DEMO_SOURCE_PATH = "fixtures/buggy_example.py"
 DEMO_TEST_PATH = "fixtures/test_buggy_example.py"
 DEMO_EXPECTED_FAILURE = "test_full_discount"
 
+allow_origins=[
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://proofloop-xi.vercel.app",
+],
+
 app = FastAPI(
     title="ProofLoop API",
     description="Evidence-driven AI code repair and regression verification.",
@@ -83,13 +89,22 @@ app.add_middleware(
 async def require_demo_access(request: Request, call_next):
     path = request.url.path
 
-    # Health checks and CORS preflight requests remain public.
-    if request.method == "OPTIONS" or not (
-        path == "/api/v1" or path.startswith("/api/v1/")
+    if (
+        request.method == "OPTIONS"
+        or path != "/api/v1" and not path.startswith("/api/v1/")
     ):
         return await call_next(request)
 
+    auth_enabled = (
+        os.getenv("PROOFLOOP_AUTH_ENABLED", "true").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+    if not auth_enabled:
+        return await call_next(request)
+
     configured_token = os.getenv("PROOFLOOP_DEMO_TOKEN", "")
+
     if not configured_token:
         return JSONResponse(
             status_code=503,
@@ -759,3 +774,8 @@ def get_repair_conversation(job_id: UUID) -> list[ConversationMessage]:
             status_code=500,
             detail="Conversation history could not be loaded.",
         ) from None
+
+AUTH_ENABLED = (
+    os.getenv("PROOFLOOP_AUTH_ENABLED", "true").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
